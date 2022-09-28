@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::ops::Add;
-use std::sync::RwLockWriteGuard;
+use std::sync::{RwLockWriteGuard, RwLock};
 
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::render::camera::Projection;
@@ -11,11 +11,14 @@ pub mod components;
 use components::*;
 
 pub mod resources;
+use kernel::Kernel;
 use resources::*;
 use resources::network::*;
 use smooth_bevy_cameras::controllers::fps::{FpsCameraPlugin, FpsCameraBundle, FpsCameraController};
 use smooth_bevy_cameras::controllers::orbit::{OrbitCameraPlugin, OrbitCameraBundle, OrbitCameraController};
 use smooth_bevy_cameras::{LookTransformBundle, LookTransform, Smoother, LookTransformPlugin};
+
+pub mod kernel;
 
 fn main() {
 	App::new()
@@ -77,16 +80,16 @@ fn setup(
 	let clip_i = spawn_clip(&mut w_network).unwrap();
 	let clip_j = spawn_clip(&mut w_network).unwrap();
 	
-	let band_a = spawn_band(&mut w_network, clip_a).unwrap();
-	let band_b = spawn_band(&mut w_network, clip_a).unwrap();
-	let band_c = spawn_band(&mut w_network, clip_a).unwrap();
-	let band_d = spawn_band(&mut w_network, clip_b).unwrap();
-	let band_e = spawn_band(&mut w_network, clip_d).unwrap();
-	let band_f = spawn_band(&mut w_network, clip_e).unwrap();
-	let band_g = spawn_band(&mut w_network, clip_d).unwrap();
-	let band_h = spawn_band(&mut w_network, clip_g).unwrap();
-	let band_i = spawn_band(&mut w_network, clip_f).unwrap();
-	let band_j = spawn_band(&mut w_network, clip_i).unwrap();
+	let band_a = spawn_band(&mut w_network, clip_a, clip_b).unwrap();
+	let band_b = spawn_band(&mut w_network, clip_b, clip_c).unwrap();
+	let band_c = spawn_band(&mut w_network, clip_c, clip_d).unwrap();
+	let band_d = spawn_band(&mut w_network, clip_b, clip_d).unwrap();
+	let band_e = spawn_band(&mut w_network, clip_d, clip_e).unwrap();
+	let band_f = spawn_band(&mut w_network, clip_e, clip_f).unwrap();
+	let band_g = spawn_band(&mut w_network, clip_d, clip_g).unwrap();
+	let band_h = spawn_band(&mut w_network, clip_g, clip_h).unwrap();
+	let band_i = spawn_band(&mut w_network, clip_f, clip_i).unwrap();
+	let band_j = spawn_band(&mut w_network, clip_i, clip_j).unwrap();
 	
 	// FIRST STREIGHT
 
@@ -103,7 +106,7 @@ fn setup(
 	let lane_c = spawn_lane_streight(&mut w_network, &mut commands, &mut meshes, &mut materials,
 		Vec2::new(0.0, spread * 1.0),
 		Vec2::new(0.0, spread * 2.0),
-		clip_b, clip_c, 0, 0, band_c
+		clip_b, clip_c, 0, 0, band_b
 	).unwrap();
 
 	// SQUIGLE
@@ -113,7 +116,7 @@ fn setup(
 		Vec2::new(3.0, spread * 2.2),
 		Vec2::new(6.0, spread * 1.8),
 		Vec2::new(6.0, spread * 3.0),
-		clip_b, clip_d, 1, 2, band_a
+		clip_b, clip_d, 1, 2, band_d
 	).unwrap();
 
 	// EXPAND
@@ -152,17 +155,17 @@ fn setup(
 	let lane_m = spawn_lane_streight(&mut w_network, &mut commands, &mut meshes, &mut materials,
 		Vec2::new(0.0, spread * 4.0),
 		Vec2::new(3.0, spread * 5.0),
-		clip_e, clip_f, 0, 1, band_f
+		clip_e, clip_f, 0, 0, band_f
 	).unwrap();
 	let lane_n = spawn_lane_streight(&mut w_network, &mut commands, &mut meshes, &mut materials,
 		Vec2::new(3.0, spread * 4.0),
 		Vec2::new(3.0, spread * 5.0),
-		clip_e, clip_f, 1, 1, band_f
+		clip_e, clip_f, 1, 0, band_f
 	).unwrap();
 	let lane_o = spawn_lane_streight(&mut w_network, &mut commands, &mut meshes, &mut materials,
 		Vec2::new(6.0, spread * 4.0),
 		Vec2::new(6.0, spread * 5.0),
-		clip_e, clip_f, 2, 2, band_f
+		clip_e, clip_f, 2, 1, band_f
 	).unwrap();
 
 	// MERGE INT
@@ -203,7 +206,14 @@ fn setup(
 
 	// VEHICLES
 
-	spawn_vehicle(&mut w_network, &mut commands, &mut meshes, &mut materials, clip_a, band_a, lane_a);
+	drop(w_network);
+
+	println!("spawning veh {} {} {}", clip_a, band_a, lane_a);
+
+	spawn_vehicle(&mut network.network, &mut commands, &mut meshes, &mut materials,
+		clip_a, band_a, lane_a,
+		clip_i, band_j, lane_r
+	);
 
 }
 
@@ -219,11 +229,42 @@ fn vehicle_system(
 	mut query: Query<(&mut VehicleComponent, &mut Transform)>,
 	mut commands: Commands
 ) {
-	let network = network.network.read().unwrap();
+	let mut network = network.network.write().unwrap();
 	for (mut vehicle, mut transform) in &mut query {
 		vehicle.distance += vehicle.speed * time.delta_seconds();
 		vehicle.speed += vehicle.acceleration * time.delta_seconds();
-		let mut lane = match network.alloc_lanes.get(&vehicle.active_lane) {
+
+		//
+
+		if vehicle.forward_lanes.len() <= 1 {
+			let clip = network.alloc_clips.get(&vehicle.active_clip).expect("invalid clip");
+			let mut best_id: u32 = 0;
+			let mut best_diff: i8 = i8::MAX;
+			let fixed_current = clip.lanes_fixed.iter().enumerate().find(
+				|x|
+				x.1.1 == vehicle.active_lane
+			).expect("invalid lane id");
+
+			for lane_id in vehicle.navigation.nav_valid_band_lanes[vehicle.navigation.recent_nav as usize].iter() {
+				if let Some(fixed_valid) = clip.lanes_fixed.iter().enumerate().find(
+					|x|
+					x.1.1 == *lane_id
+				) {
+					let diff_abs: i8 = ((fixed_valid.0 as i8) - (fixed_current.0 as i8)).abs();
+					if diff_abs < best_diff as i8 {
+						best_diff = diff_abs;
+						best_id = *lane_id;
+					}
+				}
+			}
+
+			if best_id > 0 && best_id != vehicle.active_lane {
+				vehicle.active_lane = best_id;
+				println!("moving to best lane");
+			}
+		}
+
+		let mut lane = match network.alloc_lanes.get_mut(&vehicle.active_lane) {
 			Some(x) => x,
 			None => {
 				commands.entity(vehicle.entity).despawn();
@@ -233,68 +274,56 @@ fn vehicle_system(
 		};
 		
 		while vehicle.distance >= lane.length {
-			vehicle.distance = vehicle.distance - lane.length;
-			if let Some(x) = vehicle.forward_lanes.pop_front() {
-				vehicle.forward_length = vehicle.forward_length - x.1;
+			if let Some(idx) = lane.vehicles.iter().position(|x| x.0 == vehicle.id) {
+				lane.vehicles.swap_remove(idx);
+			} else {
+				println!("failed to remove vehicle from lane; id does not exist in specified lane");
 			}
 
-			if vehicle.navigation.nav.is_empty() {
-				if !vehicle.navigation.renavigate() {
-					commands.entity(vehicle.entity).despawn();
-					println!("despawning: navigation empty");
-					break;
-				}
-			}
-			
-			let new_forward = vehicle.navigation.get_forward_lanes(
-				&network,
-				500.0 - vehicle.forward_length,
-				match vehicle.forward_lanes.back() {
-					Some(x) => x.0,
-					None => vehicle.active_lane,
-				},
-				vehicle.navigation.recent_nav + (vehicle.forward_lanes.len() as u16)
-			);
-			
-			for fl in new_forward.iter() {
-				vehicle.forward_length = vehicle.forward_length + fl.1;
-				vehicle.forward_lanes.push_back(*fl);
-			}
+			vehicle.distance -= lane.length;
 
 			if vehicle.forward_lanes.is_empty() {
-				commands.entity(vehicle.entity).despawn();
-				println!("despawning: no forward lanes");
-				break;
+				// let a = &mut *network;
+				vehicle.pull_forward_lanes(&*network);
+				println!("{:?}", vehicle.forward_lanes);
 			}
 
-			if vehicle.navigation.nav[(vehicle.navigation.recent_nav) as usize].clip != vehicle.active_clip ||
-				vehicle.navigation.nav[(vehicle.navigation.recent_nav) as usize].band != vehicle.active_band ||
-				vehicle.navigation.nav_valid_band_lanes[(vehicle.navigation.recent_nav) as usize].iter().find(|&&x| x == vehicle.active_lane) == None {
-				
-				if !vehicle.navigation.renavigate() {
-					commands.entity(vehicle.entity).despawn();
-					println!("despawning: invalid navigation");
-					break;
-				}
-			}
-
-			vehicle.navigation.recent_nav = vehicle.navigation.recent_nav + 1;
-			vehicle.active_lane = vehicle.forward_lanes.pop_front().unwrap().0;
-			let vehicle_lane = match network.alloc_lanes.get(&vehicle.active_lane) {
-				Some(x) => x,
-				None => { panic!("um"); },
-			};
-			vehicle.active_band = vehicle_lane.identity.band;
-			vehicle.active_clip = vehicle_lane.identity.clip;
-
-			lane = match network.alloc_lanes.get(&vehicle.active_lane) {
+			let fw_lane = match vehicle.forward_lanes.pop_front() {
 				Some(x) => x,
 				None => {
 					commands.entity(vehicle.entity).despawn();
-					println!("despawning: active lane invalid 2");
+					println!("despawning: no forward lanes ");
 					break;
-				},
+				}
 			};
+
+			vehicle.active_lane = fw_lane.0;
+			lane = network.alloc_lanes.get_mut(&vehicle.active_lane).expect("invalid forward lane");
+			lane.vehicles.push((vehicle.id, vehicle.distance));
+			vehicle.active_band = lane.identity.band;
+			vehicle.active_clip = lane.identity.clip;
+			vehicle.forward_length -= fw_lane.1;
+			vehicle.navigation.recent_nav += 1;
+			println!("inc recent nav to {}", vehicle.navigation.recent_nav);
+
+			let v_clip = vehicle.active_clip;
+			let v_band = vehicle.active_band;
+			let v_lane = vehicle.active_lane;
+
+			// vehicle.pull_forward_lanes(&network);
+
+			if vehicle.navigation.nav[(vehicle.navigation.recent_nav) as usize].clip != v_clip ||
+				vehicle.navigation.nav[(vehicle.navigation.recent_nav) as usize].band != v_band ||
+				vehicle.navigation.nav_valid_band_lanes[(vehicle.navigation.recent_nav) as usize].iter().find(|&&x| x == v_lane) == None {
+				
+				// if !vehicle.navigation.renavigate(&network, v_clip, v_band, v_lane) {
+				// 	commands.entity(vehicle.entity).despawn();
+				// 	println!("despawning: invalid navigation");
+				// 	break;
+				// }
+			}
+
+			// match vehicle.
 		}
 		
 		let v_pos = lane.get_interp_position(vehicle.distance);
@@ -309,17 +338,17 @@ fn spawn_clip(
 ) -> Option<u32> {
 	let clip_count = network.clip_count + 1;
 	network.clip_count = clip_count;
-	network.alloc_clips.insert(clip_count, Clip{ lanes_fixed: Vec::new() });
+	network.alloc_clips.insert(clip_count, Clip { lanes_fixed: Vec::new(), fw_bands: Vec::new() });
 	Some(clip_count)
 }
 
 fn spawn_band(
 	network: &mut RwLockWriteGuard<Network>,
-	clip_id: u32
+	src_clip: u32, dst_clip: u32
 ) -> Option<u32> {
 	let band_count = network.band_count + 1;
-	network.lane_count = band_count;
-	network.alloc_bands.insert(band_count, Band{ lanes: Vec::new() });
+	network.band_count = band_count;
+	network.alloc_bands.insert(band_count, Band { src_clip, src_min: u8::MAX, src_max: u8::MAX, dst_clip, dst_min: u8::MAX, dst_max: u8::MAX, empty: true });
 	Some(band_count)
 }
 
@@ -329,7 +358,7 @@ fn spawn_lane_streight(
 	meshes: &mut ResMut<Assets<Mesh>>,
 	materials: &mut ResMut<Assets<StandardMaterial>>,
 	p1: Vec2, p2: Vec2,
-	clip_bw: u32, clip_fw: u32, lnum_bw: u32, lnum_fw: u32, band: u32
+	clip_bw: u32, clip_fw: u32, lnum_bw: u8, lnum_fw: u8, band: u32
 ) -> Option<u32> {
 	let control = (p2 - p1) * 0.1;
 	spawn_lane(
@@ -355,7 +384,7 @@ fn spawn_lane(
 	meshes: &mut ResMut<Assets<Mesh>>,
 	materials: &mut ResMut<Assets<StandardMaterial>>,
 	p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2,
-	clip_bw: u32, clip_fw: u32, lnum_bw: u32, lnum_fw: u32, band: u32
+	clip_bw: u32, clip_fw: u32, lnum_bw: u8, lnum_fw: u8, band: u32
 ) -> Option<u32> {
 	let lane_count = network.lane_count + 1;
 	network.lane_count = lane_count;
@@ -406,19 +435,30 @@ fn spawn_lane(
 		fw: Vec::new(),
 		bw: Vec::new(),
 		length: total_distance,
+		vehicles: Vec::new(),
 	});
 
 	{
+		// println!("cbw {}", clip_bw);
 		let bw_lanes = &mut network.alloc_clips.get_mut(&clip_bw).expect("invalid clip").lanes_fixed;
-		bw_lanes.resize((lnum_bw + 1) as usize, (0, 0));
-		bw_lanes[lnum_bw as usize].0 = lane_count;
+		// println!("bw lanes {:?}", bw_lanes);
+		if bw_lanes.len() < (lnum_bw + 1) as usize {
+			bw_lanes.resize((lnum_bw + 1) as usize, (0, 0));
+		}
+		bw_lanes[lnum_bw as usize].1 = lane_count;
+		// println!("bw lanes {:?}", bw_lanes);
 	} {
+		// println!("cfw {}", clip_fw);
 		let fw_lanes = &mut network.alloc_clips.get_mut(&clip_fw).expect("invalid clip").lanes_fixed;
-		fw_lanes.resize((lnum_fw + 1) as usize, (0, 0));
-		fw_lanes[lnum_fw as usize].1 = lane_count;
+		// println!("fw lanes {:?}", fw_lanes);
+		if fw_lanes.len() < (lnum_fw + 1) as usize {
+			fw_lanes.resize((lnum_fw + 1) as usize, (0, 0));
+		}
+		fw_lanes[lnum_fw as usize].0 = lane_count;
+		// println!("fw lanes {:?}", fw_lanes);
 	}
 
-	let bw_lane = network.alloc_clips.get(&clip_bw).expect("invalid clip").lanes_fixed[lnum_bw as usize].1;
+	let bw_lane = network.alloc_clips.get(&clip_bw).expect("invalid clip").lanes_fixed[lnum_bw as usize].0;
 	match network.alloc_lanes.get_mut(&bw_lane) {
 		Some(x) => {
 			x.fw.push(NetworkIdentifier { lane: lane_count, band, clip: clip_bw });
@@ -426,13 +466,39 @@ fn spawn_lane(
 		None => {},
 	};
 
-	let fw_lane = network.alloc_clips.get(&clip_fw).expect("invalid clip").lanes_fixed[lnum_fw as usize].0;
+	let fw_lane = network.alloc_clips.get(&clip_fw).expect("invalid clip").lanes_fixed[lnum_fw as usize].1;
 	match network.alloc_lanes.get_mut(&fw_lane) {
 		Some(x) => {
 			x.bw.push(NetworkIdentifier { lane: lane_count, band, clip: clip_bw /* this lane's clip; not the forward lane's clip */ });
 		},
 		None => {},
 	};
+
+	let mut lband = network.alloc_bands.get_mut(&band).expect("invalid band");
+	if lband.empty {
+		lband.empty = false;
+		lband.src_min = lnum_bw;
+		lband.src_max = lnum_bw;
+		lband.dst_min = lnum_fw;
+		lband.dst_max = lnum_fw;
+	} else {
+		lband.src_min = lband.src_min.min(lnum_bw);
+		lband.src_max = lband.src_max.max(lnum_bw);
+		lband.dst_min = lband.src_min.min(lnum_fw);
+		lband.dst_max = lband.src_max.max(lnum_fw);
+	}
+
+	println!("c {} given fw band {}", clip_bw, band);
+
+	let fw_bands = &mut network.alloc_clips.get_mut(&clip_bw).expect("invalid clip").fw_bands;
+	if !fw_bands.contains(&band) {
+		fw_bands.push(band);
+	}
+
+
+	// .push((
+	// 	BandNode{ min: , max: todo!()  }
+	// ))
 
 	// for lane_idx in fw_fixed {
 	// 	// TODO: bands
@@ -446,13 +512,14 @@ fn spawn_lane(
 }
 
 fn spawn_vehicle(
-	network: &mut RwLockWriteGuard<Network>,
+	network_l: &mut RwLock<Network>,
 	commands: &mut Commands,
 	meshes: &mut ResMut<Assets<Mesh>>,
 	materials: &mut ResMut<Assets<StandardMaterial>>,
 	clip_src: u32, band_src: u32, lane_src: u32,
 	clip_dst: u32, band_dst: u32, lane_dst: u32
 ) {
+	let mut network = network_l.write().unwrap();
 	let vehicle_count = network.vehicle_count + 1;
 	network.vehicle_count = vehicle_count;
 
@@ -480,25 +547,27 @@ fn spawn_vehicle(
 		active_lane: lane_src,
    	distance: 0.0,
 		entity: vehicle.id(),
-		navigation: Navigation { recent_nav: 0, nav: Vec::new(), nav_valid_band_lanes: Vec::new() },
-		forward_lanes: fw_lanes,
-		forward_length: lane.length,
+		navigation: Navigation {
+			recent_nav: 0,
+			nav: Vec::new(),
+			nav_valid_band_lanes: Vec::new(),
+			target_clip: clip_dst,
+			target_band: band_dst,
+			target_lane: lane_dst
+		},
+		forward_lanes: VecDeque::new(),//fw_lanes,
+		forward_length: 0.0,//lane.length,
+		kernel: Kernel {
+			wait_exp_0: 1.0,
+			wait_exp_1: 3.0,
+			wait_releases: 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20,
+},
 	};
 
-	let new_forward = vehicle_comp.navigation.get_forward_lanes_mut(
-		network,
-		500.0 - vehicle_comp.forward_length,
-		match vehicle_comp.forward_lanes.back() {
-			Some(x) => x.0,
-			None => vehicle_comp.active_lane,
-		},
-		vehicle_comp.navigation.recent_nav + (vehicle_comp.forward_lanes.len() as u16)
-	);
-	
-	for fl in new_forward.iter() {
-		vehicle_comp.forward_length = vehicle_comp.forward_length + fl.1;
-		vehicle_comp.forward_lanes.push_back(*fl);
-	}
+	drop(network);
+	let network = network_l.read().unwrap();
+
+	vehicle_comp.navigation.renavigate(&network, clip_src, band_src, lane_src);
 
 	vehicle.insert(vehicle_comp);
 }
