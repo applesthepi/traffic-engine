@@ -3,7 +3,14 @@ use std::{sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, Arc, Mutex}, collect
 use bevy::prelude::*;
 
 use crate::components::VehicleComponent;
-
+/*
+macro_rules! clip {
+    ($expression:expr) => {
+		$expression.
+        UnsafeCell<Clip>
+    };
+}
+*/
 pub enum VTarget {
 	AccFStop,
 	DecTStop,
@@ -48,7 +55,9 @@ impl Navigation {
 			target_lane,
 		};
 
-		nav.renavigate(network, active_clip, active_band, active_lane);
+		unsafe {
+			nav.renavigate(network, active_clip, active_band, active_lane);
+		}
 		nav
 	}
 
@@ -58,7 +67,7 @@ impl Navigation {
 		self.nav_valid_band_lanes.clear();
 	}
 
-	fn update_nav(&mut self, network: &RwLockReadGuard<Network>, band_gf_costs: Vec<(u32, f64, f64)>, band_path_rev: BTreeMap<u32, u32>) {
+	unsafe fn update_nav(&mut self, network: &RwLockReadGuard<Network>, band_gf_costs: Vec<(u32, f64, f64)>, band_path_rev: BTreeMap<u32, u32>) {
 		
 		// reconstruct path
 		
@@ -74,45 +83,43 @@ impl Navigation {
 		// valid lanes
 
 		for nav in self.nav.iter_mut() {
-			let band = network.alloc_bands.get(&nav.band).expect("invalid band");
-			nav.clip = band.src_clip;
-
+			nav.clip = (*network.band(nav.band)).src_clip;
 		}
 
 		for (i, nav) in self.nav.iter().enumerate() {
-			let band = network.alloc_bands.get(&nav.band).expect("invalid band");
-			let fw_clip = network.alloc_clips.get(&band.dst_clip).expect("invalid clip");
+			let band = network.band(nav.band);
+			let fw_clip = network.clip((*band).dst_clip);
 
 			if (i + 1) == self.nav.len() {
 				self.nav_valid_band_lanes.push(vec![self.target_lane]);
 			} else {
-				let fw_band = network.alloc_bands.get(&self.nav[i + 1].band).expect("invalid band");
+				let fw_band = network.band(self.nav[i + 1].band);
 				let mut valid_lanes: Vec<u32> = Vec::new();
-				println!("mins: {} {} maxes: {} {}", fw_band.src_min, band.dst_min, fw_band.src_max, band.dst_max);
-				for j in (fw_band.src_min..(fw_band.src_max + 1)).filter(|&x| x >= band.dst_min && x <= (band.dst_max + 0)) {
-					valid_lanes.push(fw_clip.lanes_fixed[j as usize].0);
+				println!("mins: {} {} maxes: {} {}", (*fw_band).src_min, (*band).dst_min, (*fw_band).src_max, (*band).dst_max);
+				for j in ((*fw_band).src_min..((*fw_band).src_max + 1)).filter(|&x| x >= (*band).dst_min && x <= ((*band).dst_max + 0)) {
+					valid_lanes.push((*fw_clip).lanes_fixed[j as usize].0);
 				}
 				self.nav_valid_band_lanes.push(valid_lanes);
 			}
 		}
 	}
 
-	pub fn renavigate(&mut self, network: &RwLockReadGuard<Network>, active_clip: u32, active_band: u32, active_lane: u32) -> bool {
+	pub unsafe fn renavigate(&mut self, network: &RwLockReadGuard<Network>, active_clip: u32, active_band: u32, active_lane: u32) -> bool {
 		println!("renav: {} {} {}", active_clip, active_band, active_lane);
 		self.reset_nav();
-		let focus_h: Vec2 = network.alloc_lanes.get(&self.target_lane).expect("invalid lane").p4;
-		let mut current_band = network.alloc_bands.get(&active_band).expect("invalid band");
+		let focus_h: Vec2 = (*network.lane(self.target_lane)).p4;
+		let mut current_band = network.band(active_band);
 		let mut current_band_gf: u32 = 0;
 		let mut band_gf_costs: Vec<(u32, f64, f64)> = Vec::new();
 		let mut band_path_rev: BTreeMap<u32, u32> = BTreeMap::new();
 
-		println!("src clip {}", current_band.src_clip);
+		println!("src clip {}", (*current_band).src_clip);
 
 		{
-			let bw_clip = network.alloc_clips.get(&current_band.src_clip).expect("invalid clip");
-			let band_lane_idx = current_band.src_min;
-			let band_lane = network.alloc_lanes.get(&bw_clip.lanes_fixed[band_lane_idx as usize].1).expect("invalid lane");
-			band_gf_costs.push((active_band, 0.0, band_lane.p4.distance(focus_h).into()));
+			let bw_clip = network.clip((*current_band).src_clip);
+			let band_lane_idx = (*current_band).src_min;
+			let band_lane = network.lane((*bw_clip).lanes_fixed[band_lane_idx as usize].1);
+			band_gf_costs.push((active_band, 0.0, (*band_lane).p4.distance(focus_h).into()));
 		}
 
 		loop {
@@ -132,25 +139,25 @@ impl Navigation {
 			// check ended
 
 			current_band_gf = min_cost.0 as u32;
-			current_band = network.alloc_bands.get(&band_gf_costs[current_band_gf as usize].0).expect("invalid band");
+			current_band = network.band(band_gf_costs[current_band_gf as usize].0);
 
 			// check dead end
 
-			println!("{}", current_band.dst_clip);
-			let fw_clip =  network.alloc_clips.get(&current_band.dst_clip).expect("invalid clip");
+			println!("{}", (*current_band).dst_clip);
+			let fw_clip =  network.clip((*current_band).dst_clip);
 			// if fw_clip.fw_bands.is_empty() {
 			// 	band_gf_costs.remove(current_band_gf as usize);
 			// 	continue;
 			// }
 
 			// branch minimum
-			println!("{:?}", fw_clip);
-			for i in fw_clip.fw_bands.iter() {
+			println!("{:?}", *fw_clip);
+			for i in (*fw_clip).fw_bands.iter() {
 				let mut gf: (u32, f64, f64) = (*i, band_gf_costs[current_band_gf as usize].1, 0.0);
-				let band_lane_idx = network.alloc_bands.get(&i).expect("invalid band").src_min;
-				let band_lane = network.alloc_lanes.get(&fw_clip.lanes_fixed[band_lane_idx as usize].1).expect("invalid lane");
-				gf.1 += band_lane.length as f64;
-				gf.2 = gf.1 + band_lane.p4.distance(focus_h) as f64;
+				let band_lane_idx = (*network.band(*i)).src_min;
+				let band_lane = network.lane((*fw_clip).lanes_fixed[band_lane_idx as usize].1);
+				gf.1 += (*band_lane).length as f64;
+				gf.2 = gf.1 + (*band_lane).p4.distance(focus_h) as f64;
 
 				match band_gf_costs.iter().find(
 					|x|
@@ -197,12 +204,12 @@ impl Navigation {
 		// false
 	}
 
-	pub fn get_forward_lanes(&self, network: &Network, minimum_length: f32, mut active_lane: u32, mut active_nav: u16) -> Vec<(u32, f32)> {
+	pub unsafe fn get_forward_lanes(&self, network: &Network, minimum_length: f32, mut active_lane: u32, mut active_nav: u16) -> Vec<(u32, f32)> {
 		let mut result: Vec<(u32, f32)> = Vec::new();
 		let mut total_distance: f32 = 0.0;
-		let mut lane = network.alloc_lanes.get(&active_lane).expect("invalid lane");
+		let mut lane = network.lane(active_lane);
 		loop {
-			if lane.fw.is_empty() {
+			if (*lane).fw.is_empty() {
 				println!("lane.fw.is_empty()");
 				break;
 			}
@@ -211,16 +218,16 @@ impl Navigation {
 				println!("active_nav >= self.nav.len()");
 				break;
 			}
-			let valid_lane = match lane.fw.iter().enumerate().find(
+			let valid_lane = match (*lane).fw.iter().enumerate().find(
 				|x| self.nav_valid_band_lanes[active_nav as usize].contains(&x.1.lane)
 			) {
 				Some(x) => x,
-				None => { println!("no lanes fw are valid\n{:?} {:?} {:?}", self.nav, self.nav_valid_band_lanes, lane.fw); break; },
+				None => { println!("no lanes fw are valid\n{:?} {:?} {:?}", self.nav, self.nav_valid_band_lanes, (*lane).fw); break; },
 			};
 			active_lane = valid_lane.1.lane;
-			lane = network.alloc_lanes.get(&active_lane).expect("invalid lane");
-			result.push((valid_lane.1.lane, lane.length));
-			total_distance += lane.length;
+			lane = network.lane(active_lane);
+			result.push((valid_lane.1.lane, (*lane).length));
+			total_distance += (*lane).length;
 
 			if total_distance >= minimum_length {
 				println!("total_distance >= minimum_length");
@@ -230,6 +237,7 @@ impl Navigation {
 		result
 	}
 
+	/*
 	pub fn get_forward_lanes_mut(&self, network: &mut RwLockWriteGuard<Network>, minimum_length: f32, mut active_lane: u32, mut active_nav: u16) -> Vec<(u32, f32)> {
 		let mut result: Vec<(u32, f32)> = Vec::new();
 		let mut total_distance: f32 = 0.0;
@@ -259,6 +267,7 @@ impl Navigation {
 		}
 		result
 	}
+	*/
 }
 
 #[derive(Debug)]
@@ -350,4 +359,18 @@ pub struct Network {
 	pub band_count: RwLock<u32>,
 	pub lane_count: RwLock<u32>,
 	pub vehicle_count: RwLock<u32>,
+}
+
+impl Network {
+	pub fn clip(&self, clip_id: u32) -> *mut Clip {
+		self.alloc_clips.clone().lock().expect("failed to lock alloc object").get_mut(&clip_id).expect("invalid clip id").get()
+	}
+
+	pub fn band(&self, band_id: u32) -> *mut Band {
+		self.alloc_bands.clone().lock().expect("failed to lock alloc object").get_mut(&band_id).expect("invalid band id").get()
+	}
+
+	pub fn lane(&self, lane_id: u32) -> *mut Lane {
+		self.alloc_lanes.clone().lock().expect("failed to lock alloc object").get_mut(&lane_id).expect("invalid lane id").get()
+	}
 }

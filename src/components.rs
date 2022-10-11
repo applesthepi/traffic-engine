@@ -27,7 +27,7 @@ pub struct VehicleComponent {
 }
 
 impl VehicleComponent {
-	pub fn pull_forward_lanes(&mut self, network: &Network) {
+	pub unsafe fn pull_forward_lanes(&mut self, network: &Network) {
 		let new_forward = self.navigation.get_forward_lanes(
 			network,
 			500.0 - self.forward_length,
