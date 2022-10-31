@@ -1,0 +1,3 @@
+[submodule "city-hike"]
+	path = city-hike
+	url = https://github.com/applesthepi/city-hike
