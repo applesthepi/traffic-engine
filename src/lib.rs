@@ -8,13 +8,13 @@ use network::Network;
 
 use crate::network::{clip::Clip, band::Band, lane::Lane};
 
-#[tokio::main]
-async fn main() {
-	let mut network: Network = Network::default();
-	setup(&mut network);
-}
+// #[tokio::main]
+// async fn main() {
+// 	let mut network: Network = Network::default();
+// 	setup(&mut network);
+// }
 
-fn setup(
+pub fn setup(
 	network: &mut Network
 ) {
 	let spread: f32 = 5.0;
