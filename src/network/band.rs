@@ -1,6 +1,6 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 
 use super::Network;
 
@@ -24,8 +24,8 @@ pub struct Band {
 }
 
 impl Band {
-	pub fn new(
-		network: &mut Network,
+	pub async fn new(
+		network: &Arc<Network>,
 		src_clip: u32, dst_clip: u32
 	) -> u32 {
 
@@ -37,11 +37,11 @@ impl Band {
 			1,
 			Ordering::Relaxed
 		) + 1;
-		println!("aquired band id {}", id);
+		// println!("aquired band id {}", id);
 
 		// ALLOCATION
 
-		allocation.bands.write().insert(id, Arc::new(
+		allocation.bands.write().await.insert(id, Arc::new(
 			RwLock::new(Self {
 				src_clip,
 				src_min: u8::MAX,

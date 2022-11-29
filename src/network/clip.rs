@@ -1,13 +1,15 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 
 use super::Network;
 
 #[derive(Debug, Default, Clone)]
 pub struct Fixed {
-	pub fw: u32,
-	pub bw: u32,
+	pub fw_count: u8,
+	pub bw_count: u8,
+	pub fw: [u32; 5],
+	pub bw: [u32; 5],
 }
 
 #[derive(Debug, Default)]
@@ -18,8 +20,8 @@ pub struct Clip {
 }
 
 impl Clip {
-	pub fn new(
-		network: &mut Network
+	pub async fn new(
+		network: &Arc<Network>
 	) -> u32 {
 
 		let allocation = network.allocation.clone();
@@ -30,11 +32,11 @@ impl Clip {
 			1,
 			Ordering::Relaxed
 		) + 1;
-		println!("aquired clip id {}", id);
+		// println!("aquired clip id {}", id);
 
 		// ALLOCATION
 
-		allocation.clips.write().insert(id, Arc::new(
+		allocation.clips.write().await.insert(id, Arc::new(
 			RwLock::new(Self::default())
 		));
 
