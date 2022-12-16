@@ -2,7 +2,9 @@ use std::sync::{atomic::Ordering, Arc};
 
 use tokio::sync::RwLock;
 
-use super::Network;
+use crate::network_allocation;
+
+use super::{Network};
 
 #[derive(Default, Debug, Clone)]
 pub struct BandIdentity {
@@ -29,11 +31,12 @@ impl Band {
 		src_clip: u32, dst_clip: u32
 	) -> u32 {
 
-		let allocation = network.allocation.clone();
+		let network_c = network.clone();
+		let allocation = network_allocation!(network_c);
 
 		// ID
 
-		let id = network.band_count.fetch_add(
+		let id = allocation.band_count.fetch_add(
 			1,
 			Ordering::Relaxed
 		) + 1;

@@ -1,5 +1,10 @@
+#![feature(get_mut_unchecked)]
+#![feature(let_chains)]
+
 #[macro_use]
 pub mod network;
+#[macro_use]
+pub mod object;
 
 use std::{sync::{atomic::Ordering, Arc}, thread, time::Duration};
 
@@ -19,14 +24,16 @@ use crate::network::{clip::Clip, band::Band, lane::Lane};
 pub async fn setup(
 	network: &Arc<Network>
 ) {
+	network.allocation.staged_vehicle_batch.read().await.write().await.id = 1;
+	network.allocation.vehicle_batch_counter.store(1, Ordering::SeqCst);
 	let spread: f32 = 150.0;
 
-	{
-		let allocation = network.allocation.clone();
-		let mut wa_vb = allocation.vehicle_batches.write().await;
-		let new_id = network.vehicle_batch_counter.fetch_add(1, Ordering::SeqCst) + 1;
-		wa_vb.insert(new_id, allocation.staged_vehicle_batch.clone());
-	}
+	// {
+	// 	let allocation = network.allocation.clone();
+	// 	let mut wa_vb = allocation.vehicle_batches.write().await;
+	// 	let new_id = network.vehicle_batch_counter.fetch_add(1, Ordering::SeqCst) + 1;
+	// 	wa_vb.insert(new_id, allocation.staged_vehicle_batch.clone());
+	// }
 
 	let clip_a = Clip::new(network).await;
 	let clip_b = Clip::new(network).await;
@@ -199,8 +206,9 @@ pub async fn setup(
 
 	let c_network = network.clone();
 	tokio::spawn(async move {
+		thread::sleep(Duration::from_millis(500));
 		loop {
-			thread::sleep(Duration::from_millis(2_000));
+			// thread::sleep(Duration::from_millis(3_000));
 			Vehicle::new(
 				&c_network,
 				LaneIdentity {
@@ -214,6 +222,24 @@ pub async fn setup(
 					clip: clip_d
 				}
 			).await;
+			thread::sleep(Duration::from_millis(3_000));
+			Vehicle::new(
+				&c_network,
+				LaneIdentity {
+					lane: lane_a,
+					band: band_a,
+					clip: clip_a
+				},
+				LaneIdentity {
+					lane: lane_i,
+					band: band_e,
+					clip: clip_d
+				}
+			).await;
+			return;
+			// println!("{:?}", c_network.allocation.staged_vehicle_batch.read().await);
+			// println!("1");
+			// return;
 		}
 	});
 

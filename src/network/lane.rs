@@ -3,9 +3,9 @@ use std::sync::{atomic::Ordering, Arc};
 use glam::Vec2;
 use tokio::sync::RwLock;
 
-use crate::{network::{navigation::Point, clip::Fixed, LANE_MAX_BRANCH}};
+use crate::{network::{navigation::Point, clip::Fixed, LANE_MAX_BRANCH}, network_allocation};
 
-use super::{Network, vehicle::VehicleInt};
+use super::{Network, vehicle::{VehicleData}};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LaneIdentity {
@@ -28,7 +28,7 @@ pub struct Lane {
 	pub points: Vec<Point>,
 	pub length: f32,
 
-	pub vehicles: Vec<VehicleInt>,
+	pub vehicles: Vec<VehicleData>,
 }
 
 impl Lane {
@@ -62,11 +62,12 @@ impl Lane {
 		band: u32
 	) -> u32 {
 
-		let allocation = network.allocation.clone();
+		let network_c = network.clone();
+		let allocation = network_allocation!(network_c);
 
 		// ID
 
-		let id = network.lane_count.fetch_add(
+		let id = allocation.lane_count.fetch_add(
 			1,
 			Ordering::Relaxed
 		) + 1;

@@ -2,7 +2,9 @@ use std::sync::{atomic::Ordering, Arc};
 
 use tokio::sync::RwLock;
 
-use super::Network;
+use crate::network_allocation;
+
+use super::{Network, network_allocation_mut};
 
 #[derive(Debug, Default, Clone)]
 pub struct Fixed {
@@ -24,11 +26,12 @@ impl Clip {
 		network: &Arc<Network>
 	) -> u32 {
 
-		let allocation = network.allocation.clone();
+		let network_c = network.clone();
+		let allocation = network_allocation!(network_c);
 
 		// ID
 
-		let id = network.clip_count.fetch_add(
+		let id = allocation.clip_count.fetch_add(
 			1,
 			Ordering::Relaxed
 		) + 1;
