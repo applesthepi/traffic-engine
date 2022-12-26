@@ -1,13 +1,13 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use glam::Vec2;
+use nalgebra::Vector2;
 use tokio::sync::RwLock;
 
 use crate::{network::{navigation::Point, clip::Fixed, LANE_MAX_BRANCH}, network_allocation};
 
-use super::{Network, vehicle::{VehicleData}};
+use super::{Network, vehicle::{VehicleData}, signal::Signal};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct LaneIdentity {
 	pub lane: u32,
 	pub band: u32,
@@ -20,21 +20,22 @@ pub struct Lane {
 	pub fw_lanes: Vec<LaneIdentity>,
 	pub bw_lanes: Vec<LaneIdentity>,
 
-	pub p1: Vec2,
-	pub p2: Vec2,
-	pub p3: Vec2,
-	pub p4: Vec2,
+	pub p1: Vector2<f32>,
+	pub p2: Vector2<f32>,
+	pub p3: Vector2<f32>,
+	pub p4: Vector2<f32>,
 
 	pub points: Vec<Point>,
 	pub length: f32,
 
 	pub vehicles: Vec<VehicleData>,
+	pub signals: Vec<Arc<dyn Signal>>
 }
 
 impl Lane {
 	pub async fn from_streight(
 		network: &Arc<Network>,
-		p1: Vec2, p2: Vec2,
+		p1: Vector2<f32>, p2: Vector2<f32>,
 		clip_bw: u32, clip_fw: u32,
 		lnum_bw: u8, lnum_fw: u8,
 		band: u32
@@ -56,7 +57,7 @@ impl Lane {
 
 	pub async fn new(
 		network: &Arc<Network>,
-		p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2,
+		p1: Vector2<f32>, p2: Vector2<f32>, p3: Vector2<f32>, p4: Vector2<f32>,
 		clip_bw: u32, clip_fw: u32,
 		lnum_bw: u8, lnum_fw: u8,
 		band: u32
@@ -82,18 +83,18 @@ impl Lane {
 		for i in 0..count {
 			let t: f32 = (i as f32) / ((count - 1) as f32);
 			let omt: f32 = 1.0 - t;
-			let tm1: Vec2 = p1 * omt.powf(3.0);
-			let tm2: Vec2 = p2 * omt.powf(2.0) * t * 3.0;
-			let tm3: Vec2 = p3 * omt * t.powf(2.0) * 3.0;
-			let tm4: Vec2 = p4 * t.powf(3.0);
-			let p: Vec2 = tm1 + tm2 + tm3 + tm4;
+			let tm1: Vector2<f32> = p1 * omt.powf(3.0);
+			let tm2: Vector2<f32> = p2 * omt.powf(2.0) * t * 3.0;
+			let tm3: Vector2<f32> = p3 * omt * t.powf(2.0) * 3.0;
+			let tm4: Vector2<f32> = p4 * t.powf(3.0);
+			let p: Vector2<f32> = tm1 + tm2 + tm3 + tm4;
 			let mut dis: f32 = 0.0;
 			if i > 0 {
-				dis = last_point.distance(p);
+				dis = last_point.metric_distance(&p);
 			}
 			last_point = p;
 			accumulated_distance += dis;
-			points.push(Point{ position: Vec2::new(p.x, p.y), accumulated_distance });
+			points.push(Point{ position: Vector2::new(p.x, p.y), accumulated_distance });
 		}
 
 		// ALLOCATE
@@ -116,6 +117,7 @@ impl Lane {
 				bw_lanes: Vec::new(),
 				length: accumulated_distance,
 				vehicles: Vec::new(),
+				signals: Vec::new()
 			})
 		));
 		drop(wa_allocation_lanes);

@@ -8,7 +8,6 @@ use std::sync::atomic::Ordering;
 
 use bytemuck::Pod;
 use bytemuck::Zeroable;
-use glam::Vec2;
 use tokio::sync::RwLock;
 use tokio::sync::RwLockReadGuard;
 use tokio::sync::RwLockWriteGuard;
@@ -27,12 +26,15 @@ pub mod lane;
 pub mod vehicle;
 #[macro_use]
 pub mod navigation;
+#[macro_use]
+pub mod signal;
 
 use crate::network::clip::*;
 use crate::network::band::*;
 use crate::network::lane::*;
 use crate::network::vehicle::*;
 // use crate::network::navigation::*;
+use crate::network::signal::*;
 
 pub const BATCH_COUNT: usize = 10;
 pub const LANE_MAX_BRANCH: u8 = 5;

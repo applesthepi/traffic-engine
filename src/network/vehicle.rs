@@ -2,9 +2,9 @@ use std::{collections::VecDeque, sync::{atomic::Ordering, Arc}};
 
 use tokio::sync::RwLock;
 
-use crate::network::network_allocation_mut;
+use crate::network::{network_allocation_mut, signal::InstructResult};
 
-use super::{navigation::{Navigation, ForwardLane}, Network, lane::LaneIdentity, NetworkAllocation, NetworkVertex, BATCH_COUNT};
+use super::{navigation::{Navigation, ForwardLane}, Network, lane::LaneIdentity, NetworkAllocation, NetworkVertex, BATCH_COUNT, signal::{Signal, InstructSlow}};
 
 pub enum TickStatus {
 	PERSIST,
@@ -40,26 +40,26 @@ impl VehicleBatch {
 	}
 }
 
-// #[derive(Default, Debug)]
-// pub struct VehicleInt {
-// 	pub identity: VehicleIdentity,
-// 	pub distance: f32,
-// 	pub speed: f32,
-// }
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Vehicle {
 	pub data: VehicleData,
 	pub navigation: Navigation,
 	pub active_identity: LaneIdentity,
 	pub driver_personality: DriverPersonality,
 
+	pub active_signals: Vec<Arc<dyn Signal>>,
+	pub forward_signals: Vec<Arc<dyn Signal>>,
 	pub forward_vehicles: Vec<VehicleData>,
 	pub forward_lanes: VecDeque<ForwardLane>,
 	pub forward_length: f32,
+	
+	last_forward_signals: Vec<Arc<dyn Signal>>,
+	destroyed_active_signals: Vec<Arc<dyn Signal>>,
+	signal_instructs: Vec<InstructSlow>,
+	last_desired_delta: f32,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct VehicleData {
 	pub identity: VehicleIdentity,
 	pub speed: f32,
@@ -76,17 +76,19 @@ pub struct VehicleBufferInfo {
 	pub indices: Vec<u32>
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub enum VTarget {
+	#[default]
 	Wait,
 	AccFStop,
 	DecTStop,
 	AvgSpeed,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub enum VStage {
 	// stopped
+	#[default]
 	Wait,
 	// releasing break from stop
 	LiftPush,
@@ -104,7 +106,7 @@ pub enum VStage {
 	DecPull,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DriverPersonality {
 	pub willing_max_accel: f32,
 	pub willing_max_decel: f32,
@@ -115,7 +117,7 @@ impl Vehicle {
 		network: &Arc<Network>,
 		src_identity: LaneIdentity,
 		dst_identity: LaneIdentity
-	) -> u32 {
+	) -> VehicleIdentity {
 
 		let mut network_c = network.clone();
 		let mut allocation = network_allocation_mut!(network_c);
@@ -139,12 +141,9 @@ impl Vehicle {
 					band: src_identity.band,
 					clip: src_identity.clip
 				},
-				speed: 0.0,
 				pdl_gas: 0.0,
 				pdl_break: 0.1,
-				distance: 0.0,
-				target: VTarget::AccFStop,
-				stage: VStage::Wait,
+				..Default::default()
 			},
 			driver_personality: DriverPersonality {
 				willing_max_accel: 20.0,
@@ -152,14 +151,10 @@ impl Vehicle {
 			},
 			active_identity: src_identity,
 			navigation: Navigation {
-				nav: Vec::new(),
-				nav_valid_band_lanes: Vec::new(),
 				target_identity: dst_identity,
-    			active_nav: 0,
+				..Default::default()
 			},
-			forward_vehicles: Vec::new(),
-			forward_lanes: VecDeque::new(),//fw_lanes,
-			forward_length: 0.0,//lane.length,
+			..Default::default()
 		};
 		vehicle.navigation.renavigate(&allocation, vehicle.active_identity).await;
 		// println!("{:?}", vehicle.navigation);
@@ -192,7 +187,7 @@ impl Vehicle {
 		drop(c_lane);
 		
 		// println!("{:?}", allocation.staged_vehicle_batch.read().await);
-		id
+		vehicle_data.identity
 	}
 
 	pub async fn pull_forward_lanes(
@@ -219,7 +214,6 @@ impl Vehicle {
 		self.forward_vehicles.clear();
 		let active_lane = allocation.lane(self.active_identity.lane).await;
 		let ra_active_lane = active_lane.read().await;
-		// let start_dis = ra_active_lane.length - self.distance;
 		let mut accumulated_distance: f32 = ra_active_lane.length - self.data.distance;
 		for vehicle in ra_active_lane.vehicles.iter() {
 			if vehicle.distance < self.data.distance || vehicle.identity.sub == self.data.identity.sub {
@@ -241,6 +235,62 @@ impl Vehicle {
 				self.forward_vehicles.push(vehicle_data);
 			}
 			accumulated_distance += lane.length;
+		}
+	}
+
+	pub async fn pull_forward_signals(
+		&mut self,
+		allocation: &NetworkAllocation
+	) {
+		// PROPAGATE IDENTITY LANE
+
+		self.last_forward_signals.clear();
+		for signal in self.forward_signals.iter() {
+			self.last_forward_signals.push(signal.clone());
+		}
+		self.forward_signals.clear();
+		let active_lane = allocation.lane(self.active_identity.lane).await;
+		let ra_active_lane = active_lane.read().await;
+		let mut accumulated_distance: f32 = ra_active_lane.length - self.data.distance;
+		for signal in ra_active_lane.signals.iter() {
+			let signal_identity = signal.identity();
+			if signal_identity.signal_distance - self.data.distance > signal_identity.active_distance {
+				self.forward_signals.push(signal.clone());
+			}
+		}
+
+		// PROPAGATE FORWARD LANES
+		drop(ra_active_lane);
+		drop(active_lane);
+		for lane in self.forward_lanes.iter() {
+			let c_lane = allocation.lane(lane.id).await;
+			let ra_lane = c_lane.read().await;
+			for signal in ra_lane.signals.iter() {
+				let signal_identity = signal.identity();
+				if signal_identity.signal_distance + accumulated_distance > signal_identity.active_distance {
+					self.forward_signals.push(signal.clone());
+				}
+			}
+			accumulated_distance += lane.length;
+		}
+
+		// ACTIVATE SIGNAL
+
+		// TODO: Bugs possible when comparing last fw lanes to fw lanes. Make more explicit.
+		// TODO: Active signal detection can be optimized
+		for lfw_signal in self.last_forward_signals.iter() {
+			let fw_signal = self.forward_signals.iter().find(
+				|x|
+				x.identity().id == lfw_signal.identity().id
+			);
+			if fw_signal.is_none() {
+				let mut signal = lfw_signal.clone();
+				unsafe {
+					let wa_signal = Arc::get_mut_unchecked(&mut signal);
+					wa_signal.activate(allocation, &self).await;
+				}
+				self.active_signals.push(signal);
+			}
 		}
 	}
 
@@ -443,37 +493,78 @@ impl Vehicle {
 		lane_speed: f32
 	) -> TickStatus {
 		self.pull_forward_vehicles(allocation).await;
+		self.pull_forward_signals(allocation).await;
 		if self.forward_vehicles.is_empty() {
 			println!("fwv dis: NONE");
-			self.update_stage(delta_time, lane_speed);
+			self.update_target_solo(lane_speed);
+			let signal_instruct = self.calc_signal_target(allocation, lane_speed).await;
+			if signal_instruct.target_speed < lane_speed {
+				self.data.target = signal_instruct.target;
+				self.update_stage(delta_time, signal_instruct.target_speed);
+			} else {
+				println!("%%%%%%%%%%%\n%%%%%%%%%%%\n%%%%%%%%%");
+				self.update_stage(delta_time, lane_speed);
+			}
 			return TickStatus::PERSIST;
 		}
-		self.update_target();
+		self.update_target_fw();
+		let signal_instruct = self.calc_signal_target(allocation, lane_speed).await;
 		let fw_vehicle = self.forward_vehicles.first().unwrap();
 		let vb = allocation.vehicle_batch(fw_vehicle.identity.batch).await;
 		let ra_vb = vb.read().await;
-		let delta_speed = fw_vehicle.speed - self.data.speed;
-		let seconds_to_vehicle = delta_speed / fw_vehicle.distance;
+		let seconds_to_vehicle = self.data.seconds_to_moving(fw_vehicle.distance, fw_vehicle.speed);
 		match self.data.target {
 			VTarget::Wait => {},
-			VTarget::AccFStop => {
-				self.update_stage(delta_time, lane_speed.min(fw_vehicle.speed));
-			},
+			// VTarget::AccFStop => {
+			// 	let focus
+			// 	self.update_stage(delta_time, lane_speed.min(fw_vehicle.speed));
+			// },
 			VTarget::DecTStop => {
-				self.update_stage(delta_time, self.data.speed * (fw_vehicle.distance / 10.0));
+				let target_speed = self.data.speed * (fw_vehicle.distance / 10.0);
+				let min_speed = signal_instruct.target_speed.min(target_speed);
+				if min_speed == signal_instruct.target_speed {
+					self.data.target = signal_instruct.target;
+				}
+				self.update_stage(delta_time, min_speed);
 			},
-			VTarget::AvgSpeed => {
+			VTarget::AvgSpeed | VTarget::AccFStop => {
 				let focus_out = ((seconds_to_vehicle - 2.0) * 0.25).clamp(0.0, 1.0);
 				let target_speed = (fw_vehicle.speed * (1.0 - focus_out)) + (lane_speed * focus_out);
-				self.update_stage(delta_time, target_speed);
+				if signal_instruct.target_speed < target_speed {
+					self.data.target = signal_instruct.target;
+					self.update_stage(delta_time, signal_instruct.target_speed);
+				} else {
+					self.update_stage(delta_time, target_speed);
+				}
 			}
 		};
 
 		TickStatus::PERSIST
 	}
 
-	pub fn update_target(
-		&mut self
+	#[allow(unreachable_code)]
+	pub fn update_target_solo(
+		&mut self,
+		lane_speed: f32
+	) {
+		if (lane_speed - self.data.speed).abs() < 1.0 {
+			self.data.target = VTarget::AvgSpeed;
+		} else {
+			self.data.target = VTarget::AccFStop;
+		}
+		println!("target: {:?}", self.data.target);
+		return;
+		match self.data.target {
+			VTarget::Wait => {},
+			VTarget::AccFStop => {},
+			VTarget::DecTStop => {},
+			VTarget::AvgSpeed => {}
+		};
+		//println!("target: {:?}", self.data.target);
+	}
+
+	pub fn update_target_fw(
+		&mut self,
 	) {
 		let fw_vehicle = self.forward_vehicles.first().unwrap();
 		match self.data.target {
@@ -481,32 +572,33 @@ impl Vehicle {
 				if fw_vehicle.distance > 10.0 ||
 					(fw_vehicle.speed - self.data.speed) > 5.0 {
 					self.data.target = VTarget::AccFStop;
-					self.update_target();
+					self.update_target_fw();
 					return;
 				}
 			},
 			VTarget::AccFStop => {
 				// Accelerating, but fw vehicle is decelerating.
-				// CLONE TODO: OUT SOURCE TO FUNCTION
+				// CLONE; TODO: OUT SOURCE TO FUNCTION
 				if fw_vehicle.distance < 100.0 &&
 					(fw_vehicle.speed - self.data.speed) < -5.0 {
 					match fw_vehicle.target {
 						VTarget::DecTStop => {
 							self.data.target = VTarget::DecTStop;
-							self.update_target();
+							self.update_target_fw();
 							return;
 						},
 						_ => {
 							self.data.target = VTarget::AvgSpeed;
-							self.update_target();
+							self.update_target_fw();
 							return;
 						}
 					}
 				}
+				// close to fw, but not going anywhere.
 				if fw_vehicle.distance < 30.0 &&
 					(fw_vehicle.speed - self.data.speed) < 1.0 {
 					self.data.target = VTarget::AvgSpeed;
-					self.update_target();
+					self.update_target_fw();
 					return;
 				}
 			},
@@ -518,23 +610,24 @@ impl Vehicle {
 			VTarget::AvgSpeed => {
 				if (fw_vehicle.speed - self.data.speed) > 10.0 {
 					self.data.target = VTarget::AccFStop;
-					self.update_target();
+					self.update_target_fw();
 					return;
 				}
-				// CLONE TODO: OUT SOURCE TO FUNCTION
+				// CLONE; TODO: OUT SOURCE TO FUNCTION
 				if fw_vehicle.distance < 100.0 &&
 					(fw_vehicle.speed - self.data.speed) < -5.0 {
 					match fw_vehicle.target {
 						VTarget::DecTStop => {
 							self.data.target = VTarget::DecTStop;
-							self.update_target();
+							self.update_target_fw();
 							return;
 						},
 						_ => {}
 					}
 				}
 			}
-		}
+		};
+		println!("target: {:?}", self.data.target);
 	}
 
 	pub fn update_stage(
@@ -542,9 +635,12 @@ impl Vehicle {
 		delta_time: f32,
 		target_speed: f32
 	) {
-		let tolerance: f32 = 5.0;
+		let tolerance: f32 = 0.01;
 		let desired_delta = target_speed - self.data.speed;
+		let delta_delta = desired_delta - self.last_desired_delta;
+		self.last_desired_delta = desired_delta;
 		println!("stage: {:?}", self.data.stage);
+		println!("target_speed: {}", target_speed);
 		println!("desired_delta: {}", desired_delta);
 		match self.data.stage {
 			VStage::Wait => {
@@ -564,7 +660,8 @@ impl Vehicle {
 					self.update_stage(delta_time, target_speed);
 					return;
 				}
-				self.data.pdl_break -= delta_time * (0.001 * desired_delta).clamp(0.0, 0.1);
+				// RELEASING BREAK
+				self.data.pdl_break -= delta_time * (0.05 * desired_delta).clamp(0.0, 1.0);
 				if self.data.pdl_break < 0.0 {
 					self.data.pdl_break = 0.0;
 					self.data.stage = VStage::AccWait;
@@ -572,6 +669,9 @@ impl Vehicle {
 			},
 			VStage::LiftHold => {
 				if desired_delta >= 0.0 && desired_delta < tolerance {
+					return;
+				}
+				if delta_delta * delta_time > 0.5 && delta_delta * delta_time < 5.0 && desired_delta.abs() < 10.0 {
 					return;
 				}
 				if desired_delta < 0.0 {
@@ -585,18 +685,25 @@ impl Vehicle {
 				return;
 			},
 			VStage::LiftPull => {
-				if desired_delta >= 0.0 {
+				if desired_delta >= 0.0 || delta_delta * delta_time > 0.5 {
 					self.data.stage = VStage::LiftHold;
 					self.update_stage(delta_time, target_speed);
 					return;
 				}
-				self.data.pdl_break -= delta_time * (0.05 * desired_delta).clamp(-2.0, 0.0);
-				if self.data.pdl_break > 1.0 {
-					self.data.pdl_break = 1.0;
+				// PRESSING BREAK
+				if delta_delta * delta_time <= 0.0 {
+					self.data.pdl_break -= delta_time * (0.05 * desired_delta).clamp(-2.0, 0.0);
+					if self.data.pdl_break > 1.0 {
+						self.data.pdl_break = 1.0;
+					}
 				}
 			},
 			VStage::AccWait => {
-
+				if desired_delta < 0.0 {
+					self.data.stage = VStage::LiftPull;
+					self.update_stage(delta_time, target_speed);
+					return;
+				}
 			},
 			VStage::AccPush => {
 
@@ -642,5 +749,84 @@ impl Vehicle {
 		}
 	}
 
-	
+	async fn calc_signal_target(
+		&mut self,
+		allocation: &NetworkAllocation,
+		lane_speed: f32
+	) -> InstructSlow {
+		
+		// SIGNAL INSTRUCT
+
+		self.signal_instructs.clear();
+		self.destroyed_active_signals.clear();
+		for signal in self.active_signals.iter() {
+			println!("INSTRUCTING SIGNAL");
+			let mut c_signal = signal.clone();
+			unsafe {
+				let wa_signal = Arc::get_mut_unchecked(&mut c_signal);
+				match wa_signal.instruct(allocation, &self).await {
+					InstructResult::KEEP => {},
+					InstructResult::DESTROY => {
+						self.destroyed_active_signals.push(c_signal);
+					},
+					InstructResult::SLOW(instruct_slow) => {
+						self.signal_instructs.push(instruct_slow);
+					}
+				}
+			}
+		}
+
+		// DESTROY SIGNALS
+
+		for signal in self.destroyed_active_signals.iter() {
+			let pos = self.active_signals.iter().position(
+				|x|
+				x.identity().id == signal.identity().id
+			).expect("can not destroy signal that does not exist");
+			self.active_signals.swap_remove(pos);
+		}
+
+		// MIN SPEED
+
+		let mut min_signal_instruct: InstructSlow = InstructSlow {
+			target_speed: lane_speed,
+			target: VTarget::AvgSpeed
+		};
+		for signal_instruct in self.signal_instructs.iter() {
+			if signal_instruct.target_speed < min_signal_instruct.target_speed {
+				min_signal_instruct = *signal_instruct;
+			}
+		}
+		min_signal_instruct
+	}
+
+	pub async fn distance_from_fw(
+		&self,
+		allocation: &NetworkAllocation,
+		target_offset_distance: f32,
+		target_lane_id: u32
+	) -> Option<f32> {
+		let c_lane = allocation.lane(self.active_identity.lane).await;
+		let ra_lane = c_lane.read().await;
+		let mut accumulated_distance: f32 = ra_lane.length - self.data.distance;
+		drop(ra_lane);
+		drop(c_lane);
+		for lane in self.forward_lanes.iter() {
+			if lane.id == target_lane_id {
+				return Some(accumulated_distance + target_offset_distance);
+			}
+			accumulated_distance += lane.length;
+		}
+		None
+	}
+}
+
+impl VehicleData {
+	pub fn seconds_to_stationary(&self, distance: f32) -> f32 {
+		distance / self.speed
+	}
+
+	pub fn seconds_to_moving(&self, distance: f32, speed: f32) -> f32 {
+		distance / (speed - self.speed)
+	}
 }

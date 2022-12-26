@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use glam::Vec2;
+use nalgebra::Vector2;
 
 use super::{lane::LaneIdentity, NetworkAllocation, band::BandIdentity};
 
@@ -19,11 +19,11 @@ pub struct GFCost {
 
 #[derive(Debug, Default, Clone)]
 pub struct Point {
-	pub position: Vec2,
+	pub position: Vector2<f32>,
 	pub accumulated_distance: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Navigation {
 	pub active_nav: u16,
 	pub nav: Vec<BandIdentity>,
@@ -51,7 +51,7 @@ impl Navigation {
 		}
 		// println!("renav from:\n{:?}\nto:\n{:?}", active_identity, self.target_identity);
 		self.reset_nav();
-		let focus_h: Vec2 = allocation.lane(self.target_identity.lane).await.read().await.p4;
+		let focus_h: Vector2<f32> = allocation.lane(self.target_identity.lane).await.read().await.p4;
 		let mut open_gf: Vec<u32> = Vec::new();
 		let mut band_gf: BTreeMap<u32, GFCost> = BTreeMap::new();
 		let mut preceding_gf: BTreeMap<u32, u32> = BTreeMap::new();
@@ -68,7 +68,7 @@ impl Navigation {
 			active_identity.band,
 			GFCost {
 				g_cost: 0.0,
-				f_cost: ra_lane_band.p4.distance(focus_h) as f64
+				f_cost: ra_lane_band.p4.metric_distance(&focus_h) as f64
 			}
 		);
 		drop(ra_lane_band);
@@ -139,7 +139,7 @@ impl Navigation {
 					// println!("from: {} to: {}", band_min, *i);
 					let new_gf = GFCost {
 						g_cost: pos_g_cost,
-						f_cost: pos_g_cost + ra_lane_band.p4.distance(focus_h) as f64
+						f_cost: pos_g_cost + ra_lane_band.p4.metric_distance(&focus_h) as f64
 					};
 					if let Some(x) = band_gf.get_mut(i) {
 						*x = new_gf;

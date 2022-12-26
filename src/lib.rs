@@ -1,5 +1,6 @@
 #![feature(get_mut_unchecked)]
 #![feature(let_chains)]
+#![feature(async_fn_in_trait)]
 
 #[macro_use]
 pub mod network;
@@ -8,8 +9,8 @@ pub mod object;
 
 use std::{sync::{atomic::Ordering, Arc}, thread, time::Duration};
 
-use glam::Vec2;
-use network::{Network, vehicle::Vehicle, lane::LaneIdentity};
+use nalgebra::Vector2;
+use network::{Network, vehicle::Vehicle, lane::LaneIdentity, signal::{self, SignalIdentity}};
 
 use crate::network::{clip::Clip, band::Band, lane::Lane};
 
@@ -61,20 +62,20 @@ pub async fn setup(
 
 	let lane_a = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 0.0),
-		Vec2::new(spread * 0.0, spread * 1.0),
+		Vector2::new(spread * 0.0, spread * 0.0),
+		Vector2::new(spread * 0.0, spread * 1.0),
 		clip_a, clip_b, 0, 0, band_a
 	).await;
 	let lane_b = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.2, spread * 0.0),
-		Vec2::new(spread * 0.2, spread * 1.0),
+		Vector2::new(spread * 0.2, spread * 0.0),
+		Vector2::new(spread * 0.2, spread * 1.0),
 		clip_a, clip_b, 1, 1, band_a
 	).await;
 	let lane_c = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 1.0),
-		Vec2::new(spread * 0.0, spread * 2.0),
+		Vector2::new(spread * 0.0, spread * 1.0),
+		Vector2::new(spread * 0.0, spread * 2.0),
 		clip_b, clip_c, 0, 0, band_b
 	).await;
 
@@ -82,10 +83,10 @@ pub async fn setup(
 
 	let lane_dg = Lane::new(
 		network,
-		Vec2::new(spread * 0.2, spread * 1.0),
-		Vec2::new(spread * 0.2, spread * 2.2),
-		Vec2::new(spread * 0.4, spread * 1.8),
-		Vec2::new(spread * 0.4, spread * 3.0),
+		Vector2::new(spread * 0.2, spread * 1.0),
+		Vector2::new(spread * 0.2, spread * 2.2),
+		Vector2::new(spread * 0.4, spread * 1.8),
+		Vector2::new(spread * 0.4, spread * 3.0),
 		clip_b, clip_d, 1, 2, band_d
 	).await;
 
@@ -93,14 +94,14 @@ pub async fn setup(
 
 	let lane_e = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 2.0),
-		Vec2::new(spread * 0.0, spread * 3.0),
+		Vector2::new(spread * 0.0, spread * 2.0),
+		Vector2::new(spread * 0.0, spread * 3.0),
 		clip_c, clip_d, 0, 0, band_c
 	).await;
 	let lane_f = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 2.0),
-		Vec2::new(spread * 0.2, spread * 3.0),
+		Vector2::new(spread * 0.0, spread * 2.0),
+		Vector2::new(spread * 0.2, spread * 3.0),
 		clip_c, clip_d, 0, 1, band_c
 	).await;
 
@@ -108,20 +109,20 @@ pub async fn setup(
 
 	let lane_i = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 3.0),
-		Vec2::new(spread * 0.0, spread * 4.0),
+		Vector2::new(spread * 0.0, spread * 3.0),
+		Vector2::new(spread * 0.0, spread * 4.0),
 		clip_d, clip_e, 0, 0, band_e
 	).await;
 	let lane_j = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.2, spread * 3.0),
-		Vec2::new(spread * 0.2, spread * 4.0),
+		Vector2::new(spread * 0.2, spread * 3.0),
+		Vector2::new(spread * 0.2, spread * 4.0),
 		clip_d, clip_e, 1, 1, band_e
 	).await;
 	let lane_k = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.4, spread * 3.0),
-		Vec2::new(spread * 0.4, spread * 4.0),
+		Vector2::new(spread * 0.4, spread * 3.0),
+		Vector2::new(spread * 0.4, spread * 4.0),
 		clip_d, clip_e, 2, 2, band_e
 	).await;
 
@@ -129,20 +130,20 @@ pub async fn setup(
 
 	let lane_m = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.0, spread * 4.0),
-		Vec2::new(spread * 0.2, spread * 5.0),
+		Vector2::new(spread * 0.0, spread * 4.0),
+		Vector2::new(spread * 0.2, spread * 5.0),
 		clip_e, clip_f, 0, 0, band_f
 	).await;
 	let lane_n = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.2, spread * 4.0),
-		Vec2::new(spread * 0.2, spread * 5.0),
+		Vector2::new(spread * 0.2, spread * 4.0),
+		Vector2::new(spread * 0.2, spread * 5.0),
 		clip_e, clip_f, 1, 0, band_f
 	).await;
 	let lane_o = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.4, spread * 4.0),
-		Vec2::new(spread * 0.4, spread * 5.0),
+		Vector2::new(spread * 0.4, spread * 4.0),
+		Vector2::new(spread * 0.4, spread * 5.0),
 		clip_e, clip_f, 2, 1, band_f
 	).await;
 
@@ -150,14 +151,14 @@ pub async fn setup(
 
 	let lane_p = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.2, spread * 5.0),
-		Vec2::new(spread * 0.2, spread * 6.0),
+		Vector2::new(spread * 0.2, spread * 5.0),
+		Vector2::new(spread * 0.2, spread * 6.0),
 		clip_f, clip_i, 0, 0, band_i
 	).await;
 	let lane_q = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.4, spread * 5.0),
-		Vec2::new(spread * 0.4, spread * 6.0),
+		Vector2::new(spread * 0.4, spread * 5.0),
+		Vector2::new(spread * 0.4, spread * 6.0),
 		clip_f, clip_i, 1, 1, band_i
 	).await;
 
@@ -165,14 +166,14 @@ pub async fn setup(
 
 	let lane_r = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.2, spread * 6.0),
-		Vec2::new(spread * 0.2, spread * 7.0),
+		Vector2::new(spread * 0.2, spread * 6.0),
+		Vector2::new(spread * 0.2, spread * 7.0),
 		clip_i, clip_j, 0, 0, band_j
 	).await;
 	let lane_s = Lane::from_streight(
 		network,
-		Vec2::new(spread * 0.4, spread * 6.0),
-		Vec2::new(spread * 0.2, spread * 7.0),
+		Vector2::new(spread * 0.4, spread * 6.0),
+		Vector2::new(spread * 0.2, spread * 7.0),
 		clip_i, clip_j, 1, 0, band_j
 	).await;
 
@@ -180,10 +181,10 @@ pub async fn setup(
 
 	let lane_h = Lane::new(
 		network,
-		Vec2::new(spread * 0.0, spread * 3.0),
-		Vec2::new(spread * 0.0, spread * 3.2),
-		Vec2::new(spread * 0.0, spread * 3.7),
-		Vec2::new(spread * -0.4, spread * 4.0),
+		Vector2::new(spread * 0.0, spread * 3.0),
+		Vector2::new(spread * 0.0, spread * 3.2),
+		Vector2::new(spread * 0.0, spread * 3.7),
+		Vector2::new(spread * -0.4, spread * 4.0),
 		clip_d, clip_g, 0, 0, band_g
 	).await;
 
@@ -208,7 +209,7 @@ pub async fn setup(
 	tokio::spawn(async move {
 		thread::sleep(Duration::from_millis(500));
 		loop {
-			// thread::sleep(Duration::from_millis(3_000));
+			// thread::sleep(Duration::from_millis(1_000));
 			Vehicle::new(
 				&c_network,
 				LaneIdentity {
@@ -222,8 +223,31 @@ pub async fn setup(
 					clip: clip_d
 				}
 			).await;
+
+
+
+			let mut full_stop = signal::FullStop::default();
+			full_stop.signal_identity = SignalIdentity {
+				id: 1,
+				signal_distance: 0.0,
+				active_distance: 50.0,
+				clip: clip_b,
+				band: band_b,
+				lane: lane_c
+			};
+			let signal = Arc::new(full_stop);
+
+			let lane = c_network.allocation.lane(lane_c).await;
+			let mut wa_lane = lane.write().await;
+			wa_lane.signals.push(signal);
+
+
+
+
+			
+			return;
 			thread::sleep(Duration::from_millis(3_000));
-			Vehicle::new(
+			let vehicle_b = Vehicle::new(
 				&c_network,
 				LaneIdentity {
 					lane: lane_a,
@@ -236,6 +260,7 @@ pub async fn setup(
 					clip: clip_d
 				}
 			).await;
+
 			return;
 			// println!("{:?}", c_network.allocation.staged_vehicle_batch.read().await);
 			// println!("1");
