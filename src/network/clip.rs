@@ -1,10 +1,8 @@
-use std::sync::{atomic::Ordering, Arc};
-
-use tokio::sync::RwLock;
+use std::sync::{atomic::Ordering, Arc, RwLock};
 
 use crate::network_allocation;
 
-use super::{Network, network_allocation_mut};
+use super::{Network};
 
 #[derive(Debug, Default, Clone)]
 pub struct Fixed {
@@ -22,7 +20,7 @@ pub struct Clip {
 }
 
 impl Clip {
-	pub async fn new(
+	pub fn new(
 		network: &Arc<Network>
 	) -> u32 {
 
@@ -39,7 +37,7 @@ impl Clip {
 
 		// ALLOCATION
 
-		allocation.clips.write().await.insert(id, Arc::new(
+		allocation.clips.write().unwrap().insert(id, Arc::new(
 			RwLock::new(Self::default())
 		));
 

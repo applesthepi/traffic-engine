@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, sync::{atomic::Ordering, Arc}};
 
-use tokio::sync::RwLock;
+
 
 use crate::network::{network_allocation_mut, signal::InstructResult};
 
@@ -113,7 +113,7 @@ pub struct DriverPersonality {
 }
 
 impl Vehicle {
-	pub async fn new(
+	pub fn new(
 		network: &Arc<Network>,
 		src_identity: LaneIdentity,
 		dst_identity: LaneIdentity
@@ -156,7 +156,7 @@ impl Vehicle {
 			},
 			..Default::default()
 		};
-		vehicle.navigation.renavigate(&allocation, vehicle.active_identity).await;
+		vehicle.navigation.renavigate(&allocation, vehicle.active_identity);
 		// println!("{:?}", vehicle.navigation);
 		
 
@@ -165,32 +165,32 @@ impl Vehicle {
 		// VB  -> Vehicle Batch
 		// SVB -> Staged Vehicle Batch
 		// UVB -> Unused Vehicle Batch
-		// println!("{:?}", allocation.vehicle_batches.read().await);
-		let ra_svb_con = allocation.staged_vehicle_batch.read().await;
-		let mut wa_svb = ra_svb_con.write().await;
+		// println!("{:?}", allocation.vehicle_batches.read());
+		let ra_svb_con = allocation.staged_vehicle_batch.read().unwrap();
+		let mut wa_svb = ra_svb_con.write().unwrap();
 		vehicle.data.identity.batch = wa_svb.id;
 		let vehicle_data = vehicle.data.clone();
 		wa_svb.vehicles.push(vehicle);
 		if /*wa_svb.vehicles.len() >= BATCH_COUNT*/ true {
 			drop(wa_svb);
 			drop(ra_svb_con);
-			allocation.cycle_svb().await;
+			allocation.cycle_svb();
 
 
 			
 		}
 		
-		let c_lane = allocation.lane(src_identity.lane).await;
-		let mut wa_lane = c_lane.write().await;
+		let c_lane = allocation.lane(src_identity.lane);
+		let mut wa_lane = c_lane.write().unwrap();
 		wa_lane.vehicles.push(vehicle_data);
 		drop(wa_lane);
 		drop(c_lane);
 		
-		// println!("{:?}", allocation.staged_vehicle_batch.read().await);
+		// println!("{:?}", allocation.staged_vehicle_batch.read());
 		vehicle_data.identity
 	}
 
-	pub async fn pull_forward_lanes(
+	pub fn pull_forward_lanes(
 		&mut self,
 		allocation: &NetworkAllocation
 	) {
@@ -200,20 +200,20 @@ impl Vehicle {
 			allocation,
 			500.0,
 			self.active_identity.lane
-		).await;
+		);
 		for fl in new_forward.iter() {
 			self.forward_length += fl.length;
 			self.forward_lanes.push_back(fl.clone());
 		}
 	}
 
-	pub async fn pull_forward_vehicles(
+	pub fn pull_forward_vehicles(
 		&mut self,
 		allocation: &NetworkAllocation
 	) {
 		self.forward_vehicles.clear();
-		let active_lane = allocation.lane(self.active_identity.lane).await;
-		let ra_active_lane = active_lane.read().await;
+		let active_lane = allocation.lane(self.active_identity.lane);
+		let ra_active_lane = active_lane.read().unwrap();
 		let mut accumulated_distance: f32 = ra_active_lane.length - self.data.distance;
 		for vehicle in ra_active_lane.vehicles.iter() {
 			if vehicle.distance < self.data.distance || vehicle.identity.sub == self.data.identity.sub {
@@ -227,8 +227,8 @@ impl Vehicle {
 		drop(ra_active_lane);
 		drop(active_lane);
 		for lane in self.forward_lanes.iter() {
-			let c_lane = allocation.lane(lane.id).await;
-			let ra_lane = c_lane.read().await;
+			let c_lane = allocation.lane(lane.id);
+			let ra_lane = c_lane.read().unwrap();
 			for vehicle in ra_lane.vehicles.iter() {
 				let mut vehicle_data = vehicle.clone();
 				vehicle_data.distance += accumulated_distance;
@@ -238,7 +238,7 @@ impl Vehicle {
 		}
 	}
 
-	pub async fn pull_forward_signals(
+	pub fn pull_forward_signals(
 		&mut self,
 		allocation: &NetworkAllocation
 	) {
@@ -249,8 +249,8 @@ impl Vehicle {
 			self.last_forward_signals.push(signal.clone());
 		}
 		self.forward_signals.clear();
-		let active_lane = allocation.lane(self.active_identity.lane).await;
-		let ra_active_lane = active_lane.read().await;
+		let active_lane = allocation.lane(self.active_identity.lane);
+		let ra_active_lane = active_lane.read().unwrap();
 		let mut accumulated_distance: f32 = ra_active_lane.length - self.data.distance;
 		for signal in ra_active_lane.signals.iter() {
 			let signal_identity = signal.identity();
@@ -263,8 +263,8 @@ impl Vehicle {
 		drop(ra_active_lane);
 		drop(active_lane);
 		for lane in self.forward_lanes.iter() {
-			let c_lane = allocation.lane(lane.id).await;
-			let ra_lane = c_lane.read().await;
+			let c_lane = allocation.lane(lane.id);
+			let ra_lane = c_lane.read().unwrap();
 			for signal in ra_lane.signals.iter() {
 				let signal_identity = signal.identity();
 				if signal_identity.signal_distance + accumulated_distance > signal_identity.active_distance {
@@ -287,14 +287,14 @@ impl Vehicle {
 				let mut signal = lfw_signal.clone();
 				unsafe {
 					let wa_signal = Arc::get_mut_unchecked(&mut signal);
-					wa_signal.activate(allocation, &self).await;
+					wa_signal.activate(allocation, &self);
 				}
 				self.active_signals.push(signal);
 			}
 		}
 	}
 
-	pub async fn tick_temp(
+	pub fn tick_temp(
 		&mut self,
 		allocation: &NetworkAllocation,
 		delta_time: f32
@@ -306,11 +306,11 @@ impl Vehicle {
 
 		// TEMP: MOVE TO BEST LANE
 
-		self.pull_forward_lanes(allocation).await;
+		self.pull_forward_lanes(allocation);
 
 		// if /*self.forward_lanes.len() <= 1*/ false {  
-		// 	let c_clip = allocation.clip(self.active_identity.clip).await;
-		// 	let ra_clip = c_clip.read().await;
+		// 	let c_clip = allocation.clip(self.active_identity.clip);
+		// 	let ra_clip = c_clip.read();
 		// 	let mut best_id: u32 = 0;
 		// 	let mut best_diff: i8 = i8::MAX;
 
@@ -372,8 +372,8 @@ impl Vehicle {
 		// 	},
 		// };
 
-		let c_lane = allocation.lane(lane).await;
-		let mut wa_lane = c_lane.write().await;
+		let c_lane = allocation.lane(lane);
+		let mut wa_lane = c_lane.write().unwrap();
 		let lane_speed: f32 = 100.0;
 		let mut vehicle_int = wa_lane.vehicles.iter_mut().find(
 			|x|
@@ -384,7 +384,7 @@ impl Vehicle {
 		if self.data.distance < wa_lane.length {
 			drop(wa_lane);
 			drop(c_lane);
-			return self.tick_st(allocation, delta_time, lane_speed).await;
+			return self.tick_st(allocation, delta_time, lane_speed);
 		}
 
 		if self.forward_lanes.is_empty() {
@@ -397,9 +397,9 @@ impl Vehicle {
 				println!("failed to remove vehicle from lane; id does not exist in specified lane");
 			}
 			return TickStatus::DESTROY;
-			// let ra_vb_map = allocation.vehicle_batches.read().await;
+			// let ra_vb_map = allocation.vehicle_batches.read();
 			// let vb_c = ra_vb_map.get(&self.bid).expect("invalid b-id").clone();
-			// let mut wa_vb = vb_c.write().await;
+			// let mut wa_vb = vb_c.write();
 			// let vehicle_idx = wa_vb.vehicles.iter().enumerate().find(
 			// 	|x|
 			// 	x.1.id == self.id
@@ -412,8 +412,8 @@ impl Vehicle {
 		drop(c_lane);
 
 		loop {
-			let c_lane = allocation.lane(lane).await;
-			let mut wa_lane = c_lane.write().await;
+			let c_lane = allocation.lane(lane);
+			let mut wa_lane = c_lane.write().unwrap();
 
 			if let Some(idx) = wa_lane.vehicles.iter().position(
 				|x|
@@ -426,7 +426,7 @@ impl Vehicle {
 			self.data.distance -= wa_lane.length;
 			// if self.forward_lanes.is_empty() {
 			// 	// let a = &mut *network;
-			// 	self.pull_forward_lanes(allocation).await;
+			// 	self.pull_forward_lanes(allocation);
 			// 	println!("pulled forward lanes because vehicle needs more {:?}", self.forward_lanes);
 			// }
 			let fw_lane = match self.forward_lanes.pop_front() {
@@ -442,8 +442,8 @@ impl Vehicle {
 			lane = fw_lane.id;
 			drop(wa_lane);
 			drop(c_lane);
-			let c_lane = allocation.lane(lane).await;
-			let mut wa_lane = c_lane.write().await;
+			let c_lane = allocation.lane(lane);
+			let mut wa_lane = c_lane.write().unwrap();
 			self.active_identity.band = wa_lane.identity.band;
 			self.active_identity.clip = wa_lane.identity.clip;
 			self.data.identity.band = wa_lane.identity.band;
@@ -478,7 +478,7 @@ impl Vehicle {
 
 		// TARGET AND STAGE
 
-		self.tick_st(allocation, delta_time, lane_speed).await
+		self.tick_st(allocation, delta_time, lane_speed)
 		
 		// let v_pos = lane.get_interp_position(self.distance);
 
@@ -486,18 +486,18 @@ impl Vehicle {
 		// transform.translation = Vec3::new(v_pos.x, v_pos.y, 1.0);
 	}
 
-	async fn tick_st(
+	fn tick_st(
 		&mut self,
 		allocation: &NetworkAllocation,
 		delta_time: f32,
 		lane_speed: f32
 	) -> TickStatus {
-		self.pull_forward_vehicles(allocation).await;
-		self.pull_forward_signals(allocation).await;
+		self.pull_forward_vehicles(allocation);
+		self.pull_forward_signals(allocation);
 		if self.forward_vehicles.is_empty() {
 			println!("fwv dis: NONE");
 			self.update_target_solo(lane_speed);
-			let signal_instruct = self.calc_signal_target(allocation, lane_speed).await;
+			let signal_instruct = self.calc_signal_target(allocation, lane_speed);
 			if signal_instruct.target_speed < lane_speed {
 				self.data.target = signal_instruct.target;
 				self.update_stage(delta_time, signal_instruct.target_speed);
@@ -508,10 +508,10 @@ impl Vehicle {
 			return TickStatus::PERSIST;
 		}
 		self.update_target_fw();
-		let signal_instruct = self.calc_signal_target(allocation, lane_speed).await;
+		let signal_instruct = self.calc_signal_target(allocation, lane_speed);
 		let fw_vehicle = self.forward_vehicles.first().unwrap();
-		let vb = allocation.vehicle_batch(fw_vehicle.identity.batch).await;
-		let ra_vb = vb.read().await;
+		let vb = allocation.vehicle_batch(fw_vehicle.identity.batch);
+		let ra_vb = vb.read().unwrap();
 		let seconds_to_vehicle = self.data.seconds_to_moving(fw_vehicle.distance, fw_vehicle.speed);
 		match self.data.target {
 			VTarget::Wait => {},
@@ -749,7 +749,7 @@ impl Vehicle {
 		}
 	}
 
-	async fn calc_signal_target(
+	fn calc_signal_target(
 		&mut self,
 		allocation: &NetworkAllocation,
 		lane_speed: f32
@@ -764,7 +764,7 @@ impl Vehicle {
 			let mut c_signal = signal.clone();
 			unsafe {
 				let wa_signal = Arc::get_mut_unchecked(&mut c_signal);
-				match wa_signal.instruct(allocation, &self).await {
+				match wa_signal.instruct(allocation, &self) {
 					InstructResult::KEEP => {},
 					InstructResult::DESTROY => {
 						self.destroyed_active_signals.push(c_signal);
@@ -800,14 +800,14 @@ impl Vehicle {
 		min_signal_instruct
 	}
 
-	pub async fn distance_from_fw(
+	pub fn distance_from_fw(
 		&self,
 		allocation: &NetworkAllocation,
 		target_offset_distance: f32,
 		target_lane_id: u32
 	) -> Option<f32> {
-		let c_lane = allocation.lane(self.active_identity.lane).await;
-		let ra_lane = c_lane.read().await;
+		let c_lane = allocation.lane(self.active_identity.lane);
+		let ra_lane = c_lane.read().unwrap();
 		let mut accumulated_distance: f32 = ra_lane.length - self.data.distance;
 		drop(ra_lane);
 		drop(c_lane);

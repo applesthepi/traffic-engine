@@ -1,6 +1,4 @@
-use std::sync::{atomic::Ordering, Arc};
-
-use tokio::sync::RwLock;
+use std::sync::{atomic::Ordering, Arc, RwLock};
 
 use crate::network_allocation;
 
@@ -26,7 +24,7 @@ pub struct Band {
 }
 
 impl Band {
-	pub async fn new(
+	pub fn new(
 		network: &Arc<Network>,
 		src_clip: u32, dst_clip: u32
 	) -> u32 {
@@ -44,7 +42,7 @@ impl Band {
 
 		// ALLOCATION
 
-		allocation.bands.write().await.insert(id, Arc::new(
+		allocation.bands.write().unwrap().insert(id, Arc::new(
 			RwLock::new(Self {
 				src_clip,
 				src_min: u8::MAX,

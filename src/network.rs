@@ -1,6 +1,7 @@
 // Contains all basic network data structures.
 
 use std::cell::RefCell;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -8,25 +9,16 @@ use std::sync::atomic::Ordering;
 
 use bytemuck::Pod;
 use bytemuck::Zeroable;
-use tokio::sync::RwLock;
-use tokio::sync::RwLockReadGuard;
-use tokio::sync::RwLockWriteGuard;
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::CpuAccessibleBuffer;
 use vulkano::device::Device;
 use vulkano::impl_vertex;
 
-#[macro_use]
 pub mod clip;
-#[macro_use]
 pub mod band;
-#[macro_use]
 pub mod lane;
-#[macro_use]
 pub mod vehicle;
-#[macro_use]
 pub mod navigation;
-#[macro_use]
 pub mod signal;
 
 use crate::network::clip::*;
@@ -122,13 +114,13 @@ pub struct NetworkAllocation {
 }
 
 impl NetworkAllocation {
-	pub async fn cycle_svb(&self) {
-		let mut wa_svb_con = self.staged_vehicle_batch.write().await;
-		let svb_id = wa_svb_con.read().await.id;
-		let mut wa_vbs = self.vehicle_batches.write().await;
+	pub fn cycle_svb(&self) {
+		let mut wa_svb_con = self.staged_vehicle_batch.write().unwrap();
+		let svb_id = wa_svb_con.read().unwrap().id;
+		let mut wa_vbs = self.vehicle_batches.write().unwrap();
 		wa_vbs.insert(svb_id, wa_svb_con.clone());
 		drop(wa_vbs);
-		let mut wa_uvb = self.unused_vehicle_batchs.write().await;
+		let mut wa_uvb = self.unused_vehicle_batchs.write().unwrap();
 		if let Some(vb) = wa_uvb.pop() {
 			*wa_svb_con = vb.clone();
 		} else {
@@ -137,41 +129,41 @@ impl NetworkAllocation {
 		}
 	}
 
-	pub async fn clip(&self, clip_id: u32) -> Arc<RwLock<Clip>> {
-		let allocation_clips = self.clips.read().await;
+	pub fn clip(&self, clip_id: u32) -> Arc<RwLock<Clip>> {
+		let allocation_clips = self.clips.read().unwrap();
 		let clip_c = allocation_clips.get(&clip_id).expect("invalid clip id").clone();
 		clip_c
 	}
 
-	pub async fn band(&self, band_id: u32) -> Arc<RwLock<Band>> {
-		let allocation_bands = self.bands.read().await;
+	pub fn band(&self, band_id: u32) -> Arc<RwLock<Band>> {
+		let allocation_bands = self.bands.read().unwrap();
 		let band_c = allocation_bands.get(&band_id).expect("invalid band id").clone();
 		band_c
 	}
 
-	pub async fn lane(&self, lane_id: u32) -> Arc<RwLock<Lane>> {
-		let allocation_lanes = self.lanes.read().await;
+	pub fn lane(&self, lane_id: u32) -> Arc<RwLock<Lane>> {
+		let allocation_lanes = self.lanes.read().unwrap();
 		let lane_c = allocation_lanes.get(&lane_id).expect("invalid lane id").clone();
 		lane_c
 	}
 
-	pub async fn vehicle_batch(&self, vehicle_batch_id: u32) -> Arc<RwLock<VehicleBatch>> {
-		let allocation_vehicle_batches = self.vehicle_batches.read().await;
+	pub fn vehicle_batch(&self, vehicle_batch_id: u32) -> Arc<RwLock<VehicleBatch>> {
+		let allocation_vehicle_batches = self.vehicle_batches.read().unwrap();
 		let vehicle_batch_c = allocation_vehicle_batches.get(&vehicle_batch_id).expect("invalid vehicle batch id").clone();
 		vehicle_batch_c
 	}
 
-	pub async fn build(&self, device: &Arc<Device>) -> (Arc<CpuAccessibleBuffer<[NetworkVertex]>>, Arc<CpuAccessibleBuffer<[u32]>>) {
+	pub fn build(&self, device: &Arc<Device>) -> (Arc<CpuAccessibleBuffer<[NetworkVertex]>>, Arc<CpuAccessibleBuffer<[u32]>>) {
 		
 		// COLLECT NETWORK BUFFERS
 		
 		let mut vertices: Vec<NetworkVertex> = Vec::new();
 		let mut indices: Vec<u32> = Vec::new();
 		let mut index_offset: u32 = 0;
-		let allocation_lanes = self.lanes.read().await;
+		let allocation_lanes = self.lanes.read().unwrap();
 		for lane in allocation_lanes.iter() {
 			// TODO: Arc get_mut_unchecked REMOVE RwLock
-			for point in lane.1.read().await.points.iter() {
+			for point in lane.1.read().unwrap().points.iter() {
 				let square = NetworkVertex::square([point.position.x, point.position.y], 5.0, index_offset);
 				index_offset += 4;
 				vertices.extend_from_slice(&square.0);

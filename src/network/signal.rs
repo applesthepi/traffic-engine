@@ -32,8 +32,8 @@ pub enum InstructResult {
 pub trait Signal: Send + Sync {
 	fn identity(&self) -> &SignalIdentity;
 	fn identity_mut(&mut self) -> &mut SignalIdentity;
-	async fn activate(&mut self, allocation: &NetworkAllocation, vehicle: &Vehicle);
-	async fn instruct(&mut self, allocation: &NetworkAllocation, vehicle: &Vehicle) -> InstructResult;
+	fn activate(&mut self, allocation: &NetworkAllocation, vehicle: &Vehicle);
+	fn instruct(&mut self, allocation: &NetworkAllocation, vehicle: &Vehicle) -> InstructResult;
 }
 
 impl fmt::Debug for dyn Signal {
@@ -59,7 +59,7 @@ impl Signal for FullStop {
 		&mut self.signal_identity
 	}
 
-	async fn activate(&mut self,
+	fn activate(&mut self,
 		allocation: &NetworkAllocation,
 		vehicle: &Vehicle
 	) {
@@ -67,12 +67,12 @@ impl Signal for FullStop {
 			allocation,
 			self.signal_identity.signal_distance,
 			self.signal_identity.lane
-		).await.expect("stop line not in vehicle's fw lanes");
+		).expect("stop line not in vehicle's fw lanes");
 		self.vehicle_init_speed = vehicle.data.speed;
 		self.vehicle_init_distance = stop_line_distance;
 	}
 
-	async fn instruct(&mut self,
+	fn instruct(&mut self,
 		allocation: &NetworkAllocation,
 		vehicle: &Vehicle
 	) -> InstructResult {
@@ -81,7 +81,7 @@ impl Signal for FullStop {
 			allocation,
 			self.signal_identity.signal_distance,
 			self.signal_identity.lane
-		).await.expect("stop line not in vehicle's fw lanes");
+		).expect("stop line not in vehicle's fw lanes");
 		if stop_line_distance < 5.0 && vehicle.data.speed < 10.0 {
 			return InstructResult::DESTROY;
 		}

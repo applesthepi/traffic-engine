@@ -1,7 +1,7 @@
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::Ordering, Arc, RwLock};
 
 use nalgebra::Vector2;
-use tokio::sync::RwLock;
+
 
 use crate::{network::{navigation::Point, clip::Fixed, LANE_MAX_BRANCH}, network_allocation};
 
@@ -33,7 +33,7 @@ pub struct Lane {
 }
 
 impl Lane {
-	pub async fn from_streight(
+	pub fn from_streight(
 		network: &Arc<Network>,
 		p1: Vector2<f32>, p2: Vector2<f32>,
 		clip_bw: u32, clip_fw: u32,
@@ -52,10 +52,10 @@ impl Lane {
 			lnum_bw,
 			lnum_fw,
 			band
-		).await
+		)
 	}
 
-	pub async fn new(
+	pub fn new(
 		network: &Arc<Network>,
 		p1: Vector2<f32>, p2: Vector2<f32>, p3: Vector2<f32>, p4: Vector2<f32>,
 		clip_bw: u32, clip_fw: u32,
@@ -104,7 +104,7 @@ impl Lane {
 			band,
 			clip: clip_bw
 		};
-		let mut wa_allocation_lanes = allocation.lanes.write().await;
+		let mut wa_allocation_lanes = allocation.lanes.write().unwrap();
 		wa_allocation_lanes.insert(id, Arc::new(
 			RwLock::new(Self {
 				p1,
@@ -124,10 +124,10 @@ impl Lane {
 
 		// UPDATE CLIP -> LANE & LANE -> LANE
 
-		let c_clip_fw = allocation.clip(clip_fw).await;
-		let mut wa_clip_fw = c_clip_fw.write().await;
-		let c_clip_bw = allocation.clip(clip_bw).await;
-		let mut wa_clip_bw = c_clip_bw.write().await;
+		let c_clip_fw = allocation.clip(clip_fw);
+		let mut wa_clip_fw = c_clip_fw.write().unwrap();
+		let c_clip_bw = allocation.clip(clip_bw);
+		let mut wa_clip_bw = c_clip_bw.write().unwrap();
 		{
 			let lanes_fixed = &mut wa_clip_bw.lanes_fixed;
 			if (lanes_fixed.len() as u8) < (lnum_bw + 1) {
@@ -145,8 +145,8 @@ impl Lane {
 				lane_fixed.fw_count += 1;
 			}
 			for i in 0..lane_fixed.bw_count {
-				let c_lane_bw = allocation.lane(lane_fixed.bw[i as usize]).await;
-				let mut wa_lane_bw = c_lane_bw.write().await;
+				let c_lane_bw = allocation.lane(lane_fixed.bw[i as usize]);
+				let mut wa_lane_bw = c_lane_bw.write().unwrap();
 				wa_lane_bw.fw_lanes.push(identity.clone());
 			}
 		} {
@@ -160,8 +160,8 @@ impl Lane {
 			// lanes_fixed[lnum_fw as usize].bw = id;
 			// let fw_lane = lanes_fixed[lnum_fw as usize].fw;
 			// if fw_lane > 0 {
-			// 	let c_lane_fw = allocation.lane(fw_lane).await;
-			// 	let mut wa_lane_fw = c_lane_fw.write().await;
+			// 	let c_lane_fw = allocation.lane(fw_lane);
+			// 	let mut wa_lane_fw = c_lane_fw.write();
 			// 	wa_lane_fw.bw_lanes.push(identity.clone());
 			// }
 
@@ -184,16 +184,16 @@ impl Lane {
 				lane_fixed.bw_count += 1;
 			}
 			for i in 0..lane_fixed.fw_count {
-				let c_lane_fw = allocation.lane(lane_fixed.fw[i as usize]).await;
-				let mut wa_lane_fw = c_lane_fw.write().await;
+				let c_lane_fw = allocation.lane(lane_fixed.fw[i as usize]);
+				let mut wa_lane_fw = c_lane_fw.write().unwrap();
 				wa_lane_fw.bw_lanes.push(identity.clone());
 			}
 		}
 
 		// RESIZE BAND
 
-		let c_band = allocation.band(band).await;
-		let mut wa_band = c_band.write().await;
+		let c_band = allocation.band(band);
+		let mut wa_band = c_band.write().unwrap();
 		{
 			let band_w = &mut wa_band;
 			if band_w.empty {
