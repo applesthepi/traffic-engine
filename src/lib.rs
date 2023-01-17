@@ -204,7 +204,7 @@ pub fn setup(
 	// 		clip: clip_d
 	// 	}
 	// );
-
+		return;
 	let c_network = network.clone();
 	std::thread::spawn(move || {
 		thread::sleep(Duration::from_millis(500));

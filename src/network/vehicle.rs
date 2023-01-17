@@ -40,6 +40,11 @@ impl VehicleBatch {
 	}
 }
 
+// #[derive(Debug, Default)]
+// pub struct GpuVehicle {
+// 	// pub 
+// }
+
 #[derive(Debug, Default)]
 pub struct Vehicle {
 	pub data: VehicleData,

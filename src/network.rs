@@ -31,6 +31,18 @@ use crate::network::signal::*;
 pub const BATCH_COUNT: usize = 10;
 pub const LANE_MAX_BRANCH: u8 = 5;
 
+// #[repr(C)]
+// #[derive(Debug, Default, Copy, Clone, Pod, Zeroable)]
+// pub struct GpuVehicle {
+// 	pub position: [f32; 2],
+// }
+
+// #[repr(C)]
+// #[derive(Debug, Pod, Zeroable)]
+// pub struct GpuNetwork {
+// 	pub lanes: [GpuVehicle]
+// }
+
 #[macro_export]
 macro_rules! network_allocation_mut {
 	($network:expr) => {
