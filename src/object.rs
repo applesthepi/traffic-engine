@@ -1,3 +1,4 @@
+/*
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}, RwLock};
 
 use vulkano::{buffer::{CpuAccessibleBuffer, BufferUsage}, device::Device, command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer}};
@@ -91,3 +92,4 @@ impl NetworkObject {
 		).unwrap();
 	}
 }
+*/

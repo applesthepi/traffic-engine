@@ -1,3 +1,4 @@
+/*
 use core::fmt;
 
 use async_trait::async_trait;
@@ -98,3 +99,4 @@ impl Signal for FullStop {
 		// InstructResult::KEEP
 	}
 }
+*/

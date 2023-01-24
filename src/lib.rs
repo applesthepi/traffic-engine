@@ -10,7 +10,7 @@ pub mod object;
 use std::{sync::{atomic::Ordering, Arc}, thread, time::Duration};
 
 use nalgebra::Vector2;
-use network::{Network, vehicle::Vehicle, lane::LaneIdentity, signal::{self, SignalIdentity}};
+use network::{Network, vehicle::Vehicle, lane::LaneIdentity, signal::{self}};
 
 use crate::network::{clip::Clip, band::Band, lane::Lane};
 
@@ -20,6 +20,7 @@ use crate::network::{clip::Clip, band::Band, lane::Lane};
 // 	setup(&mut network);
 // }
 
+/*
 
 #[allow(unused_variables)]
 pub fn setup(
@@ -278,3 +279,4 @@ pub fn setup(
 
 	// Ok(())
 }
+*/

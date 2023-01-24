@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::RwLockReadGuard};
 
 use nalgebra::Vector2;
 
-use super::{lane::LaneIdentity, NetworkAllocation, band::BandIdentity};
+use super::{lane::{LaneIdentity, Lane}, band::{BandIdentity, Band}, Network, clip::Clip};
 
 #[derive(Debug, Clone)]
 pub struct ForwardLane {
@@ -17,7 +17,7 @@ pub struct GFCost {
 	pub f_cost: f64,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Point {
 	pub position: Vector2<f32>,
 	pub accumulated_distance: f32,
@@ -40,18 +40,21 @@ impl Navigation {
 
 	pub fn renavigate(
 		&mut self,
-		allocation: &NetworkAllocation,
+		network: &mut Network,
 		active_identity: LaneIdentity
 	) -> bool {
+		let ra_clips = network.clips.read().unwrap();
+		let ra_bands = network.bands.read().unwrap();
+		let ra_lanes = network.lanes.read().unwrap();
 		// G -> cost to start node
 		// H -> estemated cost of start to end
 		if active_identity.band == self.target_identity.band {
-			println!("can not navigate to the same band");
+			println!("can not navigate to the same band: {} {}", active_identity.band, self.target_identity.band);
 			return false;
 		}
 		// println!("renav from:\n{:?}\nto:\n{:?}", active_identity, self.target_identity);
 		self.reset_nav();
-		let focus_h: Vector2<f32> = allocation.lane(self.target_identity.lane).read().unwrap().p4;
+		let focus_h: Vector2<f32> = ra_lanes[self.target_identity.lane as usize].p4;
 		let mut open_gf: Vec<u32> = Vec::new();
 		let mut band_gf: BTreeMap<u32, GFCost> = BTreeMap::new();
 		let mut preceding_gf: BTreeMap<u32, u32> = BTreeMap::new();
@@ -61,8 +64,7 @@ impl Navigation {
 
 		// INITIAL
  
-		let c_lane_band = allocation.lane(active_identity.lane);
-		let ra_lane_band = c_lane_band.read().unwrap();
+		let ra_lane_band = &ra_lanes[active_identity.lane as usize];
 		open_gf.push(active_identity.band);
 		band_gf.insert(
 			active_identity.band,
@@ -72,7 +74,6 @@ impl Navigation {
 			}
 		);
 		drop(ra_lane_band);
-		drop(c_lane_band);
 
 		while !open_gf.is_empty() {
 
@@ -85,16 +86,14 @@ impl Navigation {
 			let band_min = *min_cost.1;
 			if band_min == self.target_identity.band {
 				let preceding_band_id = preceding_gf[&band_min];
-				let c_band_prev = allocation.band(preceding_band_id);
-				let ra_band_prev = c_band_prev.read().unwrap();
-				let c_clip_prev = allocation.clip(ra_band_prev.dst_clip);
-				let ra_clip_prev = c_clip_prev.read().unwrap();
+				let ra_band_prev = &ra_bands[preceding_band_id as usize];
+				let ra_clip_prev = &ra_clips[ra_band_prev.dst_clip as usize];
 				let lf_target_lane = ra_clip_prev.lanes_fixed.iter().enumerate().find(
 					|x|
 					{
 						let f = x.1;
-						for i in 0..f.fw_count {
-							if f.fw[i as usize] == self.target_identity.lane {
+						for fw_lane in f.fw.iter() {
+							if *fw_lane == self.target_identity.lane {
 								return true;
 							}
 						}
@@ -103,7 +102,7 @@ impl Navigation {
 				).expect("target lane does not exist");
 				if (lf_target_lane.0 as u8) >= ra_band_prev.dst_min &&
 					(lf_target_lane.0 as u8) <= ra_band_prev.dst_max {
-					self.update_nav(&allocation, &preceding_gf, &active_identity);
+					self.update_nav(&ra_clips, &ra_bands, &preceding_gf, &active_identity);
 					return true;
 				}
 				open_gf.remove(min_cost.0);
@@ -116,15 +115,12 @@ impl Navigation {
 			// BRANCH FROM CURRENT
 
 			let gf = band_gf[&band_min];
-			let c_band_current = allocation.band(band_min);
-			let ra_band_current = c_band_current.read().unwrap();
-			let c_clip_fw = allocation.clip(ra_band_current.dst_clip);
-			let ra_clip_fw = c_clip_fw.read().unwrap();
+			let ra_band_current = &ra_bands[band_min as usize];
+			let ra_clip_fw = &ra_clips[ra_band_current.dst_clip as usize];
 			// let current_gf_cost = band_gf_costs[current_band_gf as usize];
 			for i in ra_clip_fw.fw_bands.iter() {
-				let band_lane_idx = allocation.band(*i).read().unwrap().src_min;
-				let c_lane_band = allocation.lane(ra_clip_fw.lanes_fixed[band_lane_idx as usize].fw[0]);
-				let ra_lane_band = c_lane_band.read().unwrap();
+				let band_lane_idx = ra_bands[*i as usize].src_min;
+				let ra_lane_band = &ra_lanes[ra_clip_fw.lanes_fixed[band_lane_idx as usize].fw[0] as usize];
 				let pos_g_cost: f64 = gf.g_cost + ra_lane_band.length as f64;
 				let fw_band_g_cost: f64 = match band_gf.get(i) {
 					Some(x) => x.g_cost,
@@ -158,14 +154,12 @@ impl Navigation {
 
 	fn update_nav(
 		&mut self,
-		allocation: &NetworkAllocation,
+		ra_clips: &RwLockReadGuard<Vec<Clip>>,
+		ra_bands: &RwLockReadGuard<Vec<Band>>,
 		preceding_gf: &BTreeMap<u32, u32>,
 		active_identity: &LaneIdentity
 	) {
-		
 		// RECONSTRUCT
-
-		// println!("{:?}", preceding_gf);
 		
 		let mut current: u32 = self.target_identity.band;
 		loop {
@@ -185,19 +179,16 @@ impl Navigation {
 		// VALIDATE LANES
 
 		for nav in self.nav.iter_mut() {
-			nav.clip = allocation.band(nav.band).read().unwrap().src_clip;
+			nav.clip = ra_bands[nav.band as usize].src_clip;
 		}
 
 		for (i, nav) in self.nav.iter().enumerate() {
-			let c_band = allocation.band(nav.band);
-			let ra_band = c_band.read().unwrap();
-			let c_clip_fw = allocation.clip(ra_band.dst_clip);
-			let ra_clip_fw = c_clip_fw.read().unwrap();
+			let ra_band = &ra_bands[nav.band as usize];
+			let ra_clip_fw = &ra_clips[ra_band.dst_clip as usize];
 			if (i + 1) == self.nav.len() {
 				self.nav_valid_band_lanes.push(vec![self.target_identity.lane]);
 			} else {
-				let c_band_fw = allocation.band(self.nav[i + 1].band);
-				let ra_band_fw = c_band_fw.read().unwrap();
+				let ra_band_fw = ra_bands[self.nav[i + 1].band as usize];
 				let mut valid_lanes: Vec<u32> = Vec::new();
 				// println!("mins: {} {} maxes: {} {}", (*fw_band).src_min, (*band).dst_min, (*fw_band).src_max, (*band).dst_max);
 				for j in (ra_band_fw.src_min..(ra_band_fw.src_max + 1)).filter(
@@ -205,8 +196,8 @@ impl Navigation {
 					x >= ra_band.dst_min && x <= (ra_band.dst_max + 0)
 				) {
 					let lane_fixed = &ra_clip_fw.lanes_fixed[j as usize];
-					for l in 0..lane_fixed.bw_count {
-						valid_lanes.push(lane_fixed.bw[l as usize]);
+					for lane_bw in lane_fixed.bw.iter() {
+						valid_lanes.push(*lane_bw);
 					}
 				}
 				self.nav_valid_band_lanes.push(valid_lanes);
@@ -216,7 +207,7 @@ impl Navigation {
 
 	pub fn get_forward_lanes(
 		&self,
-		allocation: &NetworkAllocation,
+		ra_lanes: RwLockReadGuard<Vec<Lane>>,
 		minimum_length: f32,
 		active_lane: u32
 	) -> Vec<ForwardLane> {
@@ -228,8 +219,7 @@ impl Navigation {
 			if nav_idx >= self.nav_valid_band_lanes.len() as u32 {
 				break;
 			}
-			let c_lane = allocation.lane(lane);
-			let ra_lane = c_lane.read().unwrap();
+			let ra_lane = &ra_lanes[lane as usize];
 			{
 				if ra_lane.fw_lanes.is_empty() {
 					println!("lane.fw_lanes.is_empty()");
@@ -249,9 +239,7 @@ impl Navigation {
 				nav_idx += 1;
 			} {
 				drop(ra_lane);
-				drop(c_lane);
-				let c_lane = allocation.lane(lane);
-				let ra_lane = c_lane.read().unwrap();
+				let ra_lane = &ra_lanes[lane as usize];
 				result.push(ForwardLane {
 					id: ra_lane.identity.lane,
 					length: ra_lane.length,
