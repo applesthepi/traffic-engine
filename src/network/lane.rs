@@ -25,6 +25,7 @@ pub struct Lane {
 	pub p4: Vector2<f32>,
 
 	pub points: [Point; LANE_MAX_POINTS],
+	pub point_distance: [f32; LANE_MAX_POINTS],
 	pub length: f32,
 
 	pub vehicles: [u32; LANE_MAX_VEHICLES],
@@ -39,6 +40,7 @@ impl Default for Lane {
 			p3: Vector2::default(),
 			p4: Vector2::default(),
 			points: [Point::default(); LANE_MAX_POINTS],
+			point_distance: Default::default(),
 			identity: LaneIdentity::default(),
 			fw_lanes: [LaneIdentity::default(); LANE_MAX_CONNECTIONS],
 			bw_lanes: [LaneIdentity::default(); LANE_MAX_CONNECTIONS],
@@ -88,7 +90,8 @@ impl Lane {
 		
 		// GENERATE POSITIONS
 
-		let mut points: Vec<Point> = Vec::new();
+		let mut points: [Point; LANE_MAX_POINTS] = Default::default();
+		let mut point_distance: [f32; LANE_MAX_POINTS] = Default::default();
 		let mut last_point = p1;
 		let mut accumulated_distance: f32 = 0.0;
 		let count: u8 = 5;
@@ -106,7 +109,8 @@ impl Lane {
 			}
 			last_point = p;
 			accumulated_distance += dis;
-			points.push(Point{ position: Vector2::new(p.x, p.y), accumulated_distance });
+			points[i as usize] = Point{ position: Vector2::new(p.x, p.y), accumulated_distance };
+			point_distance[i as usize] = accumulated_distance;
 		}
 
 		// ALLOCATE
@@ -122,6 +126,7 @@ impl Lane {
 			p3,
 			p4,
 			points: points.try_into().unwrap(),
+			point_distance,
 			identity,
 			length: accumulated_distance,
 			..Default::default()
