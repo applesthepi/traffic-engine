@@ -16,13 +16,15 @@ pub const LANE_MAX_CONNECTIONS: usize = 5;
 pub const LANE_MAX_POINTS: usize = 5;
 pub const LANE_MAX_VEHICLES: usize = 100;
 
-pub const VEHICLES_PER_PAGE: usize = 64 * 16;
+pub const THREADS_PER_BLOCK: usize = 64;
+pub const BLOCKS_PER_PAGE: usize = 512;
+pub const VEHICLES_PER_PAGE: usize = THREADS_PER_BLOCK * BLOCKS_PER_PAGE;
 
 pub struct UnusedIds {
-	unused_clips: Vec<u32>,
-	unused_bands: Vec<u32>,
-	unused_lanes: Vec<u32>,
-	unused_vehicles: Vec<u32>,
+	pub unused_clips: Vec<u32>,
+	pub unused_bands: Vec<u32>,
+	pub unused_lanes: Vec<u32>,
+	pub unused_vehicles: Vec<u32>,
 }
 
 pub struct Network {
@@ -31,7 +33,7 @@ pub struct Network {
 	pub lanes: Arc<RwLock<Vec<Lane>>>,
 	pub vehicles: Arc<RwLock<Vec<Vehicle>>>,
 
-	unused_ids: Arc<RwLock<UnusedIds>>,
+	pub unused_ids: Arc<RwLock<UnusedIds>>,
 
 	clip_id_counter: AtomicU32,
 	band_id_counter: AtomicU32,

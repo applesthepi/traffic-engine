@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::RwLockReadGuard};
+use std::{collections::VecDeque, sync::{RwLockReadGuard, Arc}};
 
 use super::{navigation::{Navigation, ForwardLane}, Network, lane::{LaneIdentity, Lane}};
 
@@ -117,8 +117,13 @@ impl Vehicle {
 		network: &mut Network,
 		src_identity: LaneIdentity,
 		dst_identity: LaneIdentity
-	) -> VehicleIdentity {
+	) -> Result<VehicleIdentity, ()> {
 		let id = network.fetch_vehicle_id();
+		let ra_vehicles = network.vehicles.read().unwrap();
+		if id >= ra_vehicles.len() as u32 {
+			return Err(());
+		}
+		drop(ra_vehicles);
 		let mut vehicle = Self {
 			data: VehicleData {
 				identity: VehicleIdentity {
@@ -142,10 +147,10 @@ impl Vehicle {
 			},
 			..Default::default()
 		};
+
 		vehicle.navigation.renavigate(network, vehicle.active_identity);
 		let identity = vehicle.data.identity;
-		// SPAWN VEHICLE
-
+		
 		let mut wa_vehicles = network.vehicles.write().unwrap();
 		let wa_vehicle = &mut wa_vehicles[id as usize];
 		*wa_vehicle = vehicle;
@@ -153,7 +158,7 @@ impl Vehicle {
 		let wa_lanes = network.lanes.write().unwrap();
 		let mut wa_lane = wa_lanes[src_identity.lane as usize];
 		wa_lane.add_vehicle(id);
-		identity
+		Ok(identity)
 	}
 
 	// pub fn pull_forward_lanes(
