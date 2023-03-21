@@ -14,6 +14,10 @@ use network::{Network, vehicle::Vehicle, lane::LaneIdentity, signal::{self}};
 
 use crate::network::{clip::Clip, band::Band, lane::Lane};
 
+fn test() {
+	vpe::UseBase(vpb::Base{1});
+}
+
 // #[tokio::main]
 // fn main() {
 // 	let mut network: Network = Network::default();
