@@ -1,0 +1,3 @@
+[submodule "vp-engine"]
+	path = vp-engine
+	url = https://github.com/applesthepi/vp-engine
