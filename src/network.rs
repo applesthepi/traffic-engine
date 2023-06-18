@@ -62,8 +62,7 @@ impl Network {
 		lanes.resize_with(1024, Lane::default);
 		let mut vehicles = Vec::with_capacity(1024);
 		vehicles.resize_with(1024 * 3, Vehicle::default);
-
-		let mut network = Network {
+		Network {
 			clips: Arc::new(RwLock::new(clips)),
 			bands: Arc::new(RwLock::new(bands)),
 			lanes: Arc::new(RwLock::new(lanes)),
@@ -73,49 +72,66 @@ impl Network {
 			band_id_counter: AtomicU32::new(1),
 			lane_id_counter: AtomicU32::new(1),
 			vehicle_id_counter: AtomicU32::new(1),
-		};
-		network
+		}
 	}
 
 	pub fn fetch_clip_id(&mut self) -> u32 {
 		let mut wa_unused_ids = self.unused_ids.write().unwrap();
-		match wa_unused_ids.unused_clips.pop() {
+		let id = match wa_unused_ids.unused_clips.pop() {
 			Some(unused_id) => {
 				unused_id
 			},
 			None => {
 				self.clip_id_counter.fetch_add(1, Ordering::SeqCst)
 			}
+		};
+		let mut wa_clips = self.clips.write().unwrap();
+		let clips_length = wa_clips.len();
+		if id >= clips_length as u32 {
+			wa_clips.resize_with(clips_length * 2, Clip::default);
 		}
+		id
 	}
 
 	pub fn fetch_band_id(&mut self) -> u32 {
 		let mut wa_unused_ids = self.unused_ids.write().unwrap();
-		match wa_unused_ids.unused_bands.pop() {
+		let id = match wa_unused_ids.unused_bands.pop() {
 			Some(unused_id) => {
 				unused_id
 			},
 			None => {
 				self.band_id_counter.fetch_add(1, Ordering::SeqCst)
 			}
+		};
+		let mut wa_bands = self.bands.write().unwrap();
+		let bands_length = wa_bands.len();
+		if id >= bands_length as u32 {
+			wa_bands.resize_with(bands_length * 2, Band::default);
 		}
+		id
 	}
 
 	pub fn fetch_lane_id(&mut self) -> u32 {
 		let mut wa_unused_ids = self.unused_ids.write().unwrap();
-		match wa_unused_ids.unused_lanes.pop() {
+		let id = match wa_unused_ids.unused_lanes.pop() {
 			Some(unused_id) => {
 				unused_id
 			},
 			None => {
 				self.lane_id_counter.fetch_add(1, Ordering::SeqCst)
 			}
+		};
+		let mut wa_lanes = self.lanes.write().unwrap();
+		let lanes_length = wa_lanes.len();
+		if id >= lanes_length as u32 {
+			wa_lanes.resize_with(lanes_length * 2, Lane::default);
 		}
+		id
 	}
 
 	pub fn fetch_vehicle_id(&mut self) -> u32 {
 		let mut wa_unused_ids = self.unused_ids.write().unwrap();
-		match wa_unused_ids.unused_vehicles.pop() {
+		let id = match wa_unused_ids.unused_vehicles.pop() {
 			Some(unused_id) => {
 				unused_id
 			},
@@ -127,7 +143,13 @@ impl Network {
 					idx
 				}
 			}
+		};
+		let mut wa_vehicles = self.vehicles.write().unwrap();
+		let vehicles_length = wa_vehicles.len();
+		if id >= vehicles_length as u32 {
+			wa_vehicles.resize_with(vehicles_length * 2, Vehicle::default);
 		}
+		id
 	}
 
 	pub fn clips(&self) -> Arc<RwLock<Vec<Clip>>> {

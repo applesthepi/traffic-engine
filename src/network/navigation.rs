@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::RwLockReadGuard};
 
-use nalgebra::Vector2;
+use nalgebra::{Vector2, vector};
 
 use super::{lane::{LaneIdentity, Lane}, band::{BandIdentity, Band}, Network, clip::Clip};
 
@@ -54,7 +54,8 @@ impl Navigation {
 		}
 		// println!("renav from:\n{:?}\nto:\n{:?}", active_identity, self.target_identity);
 		self.reset_nav();
-		let focus_h: Vector2<f32> = ra_lanes[self.target_identity.lane as usize].p4;
+		let p4 = ra_lanes[self.target_identity.lane as usize].p4;
+		let focus_h: Vector2<f32> = vector![p4.x, p4.y];
 		let mut open_gf: Vec<u32> = Vec::new();
 		let mut band_gf: BTreeMap<u32, GFCost> = BTreeMap::new();
 		let mut preceding_gf: BTreeMap<u32, u32> = BTreeMap::new();
@@ -65,12 +66,13 @@ impl Navigation {
 		// INITIAL
  
 		let ra_lane_band = &ra_lanes[active_identity.lane as usize];
+		let p4 = ra_lane_band.p4;
 		open_gf.push(active_identity.band);
 		band_gf.insert(
 			active_identity.band,
 			GFCost {
 				g_cost: 0.0,
-				f_cost: ra_lane_band.p4.metric_distance(&focus_h) as f64
+				f_cost: vector![p4.x, p4.y].metric_distance(&focus_h) as f64
 			}
 		);
 		drop(ra_lane_band);
@@ -133,9 +135,10 @@ impl Navigation {
 						preceding_gf.insert(*i, band_min);
 					}
 					// println!("from: {} to: {}", band_min, *i);
+					let p4 = ra_lane_band.p4;
 					let new_gf = GFCost {
 						g_cost: pos_g_cost,
-						f_cost: pos_g_cost + ra_lane_band.p4.metric_distance(&focus_h) as f64
+						f_cost: pos_g_cost + vector![p4.x, p4.y].metric_distance(&focus_h) as f64
 					};
 					if let Some(x) = band_gf.get_mut(i) {
 						*x = new_gf;
