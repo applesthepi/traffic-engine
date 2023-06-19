@@ -1,7 +1,6 @@
 use std::{sync::RwLockWriteGuard, ops::Mul};
 
-use nalgebra::Vector2;
-use nalgebra_glm::{identity, translate2d, vec2, translate, rotate, rotate2d, vec3, vec4, Vec3, Mat4, Vec2};
+use nalgebra::{Vector2, Vector3, Matrix4, Matrix3, Point2};
 
 use crate::{network::{navigation::Point}};
 
@@ -20,10 +19,10 @@ pub struct Lane {
 	pub fw_lanes: [LaneIdentity; LANE_MAX_CONNECTIONS],
 	pub bw_lanes: [LaneIdentity; LANE_MAX_CONNECTIONS],
 
-	pub p1: Vec2,
-	pub p2: Vec2,
-	pub p3: Vec2,
-	pub p4: Vec2,
+	pub p1: Vector2<f32>,
+	pub p2: Vector2<f32>,
+	pub p3: Vector2<f32>,
+	pub p4: Vector2<f32>,
 
 	pub points: [Point; LANE_MAX_POINTS],
 	pub point_distance: [f32; LANE_MAX_POINTS],
@@ -36,10 +35,10 @@ pub struct Lane {
 impl Default for Lane {
 	fn default() -> Self {
 		Self {
-			p1: Vec2::default(),
-			p2: Vec2::default(),
-			p3: Vec2::default(),
-			p4: Vec2::default(),
+			p1: Vector2::default(),
+			p2: Vector2::default(),
+			p3: Vector2::default(),
+			p4: Vector2::default(),
 			points: [Point::default(); LANE_MAX_POINTS],
 			point_distance: Default::default(),
 			identity: LaneIdentity::default(),
@@ -91,17 +90,17 @@ impl Lane {
 	) -> u32 {
 		let id = network.fetch_lane_id();
 
-		let clips = network.clips().clone();
+		let clips = network.clips();
 		let mut wa_clips = clips.write().unwrap();
-		let lanes = network.lanes().clone();
+		let lanes = network.lanes();
 		let mut wa_lanes = lanes.write().unwrap();
 		
 		// GENERATE CONTROL POINTS
 
-		let mut p1: Vec3 = vec3(0.0, 0.0, 0.0);
-		let mut p2: Vec3 = vec3(0.0, 0.0, 0.0);
-		let mut p3: Vec3 = vec3(0.0, 0.0, 0.0);
-		let mut p4: Vec3 = vec3(0.0, 0.0, 0.0);
+		let p1: Point2<f32>;
+		let p2: Point2<f32>;
+		let p3: Point2<f32>;
+		let p4: Point2<f32>;
 
 		{
 			let wa_clip_bw = &mut wa_clips[clip_bw as usize];
@@ -109,30 +108,27 @@ impl Lane {
 			for lane_fixed_idx in 0..lnum_bw {
 				let lane_fixed = &wa_clip_bw.lanes_fixed[lane_fixed_idx as usize];
 				clip_bw_offset += lane_fixed.width;
+			} {
+				let lane_fixed = &wa_clip_bw.lanes_fixed[lnum_bw as usize];
+				clip_bw_offset += lane_fixed.width * 0.5;
 			}
-			let matrix_bwc: Mat4 = rotate(
-				&identity(),
-				0.0,
-				&vec3(0.0, 1.0, 0.0),
+			let matrix_bwc: Matrix3<f32> = Matrix3::new_rotation(
+				wa_clip_bw.angle,
 			);
-			let matrix_bwc: Mat4 = translate(
-				&matrix_bwc,
+			let matrix_bwc: Matrix3<f32> = matrix_bwc.append_translation(
 				&wa_clip_bw.position,
 			);
-			p1 = matrix_bwc.transform_vector(
-				&vec3(clip_bw_offset, 0.0, 0.0),
+			p1 = matrix_bwc.transform_point(
+				&Point2::new(clip_bw_offset, 0.0),
 			);
-			let matrix_c1: Mat4 = rotate(
-				&identity(),
+			let matrix_c1: Matrix3<f32> = Matrix3::new_rotation(
 				c1.0,
-				&vec3(0.0, 1.0, 0.0),
 			);
-			let matrix_c1: Mat4 = translate(
-				&matrix_c1,
-				&p1,
+			let matrix_c1 = matrix_c1.append_translation(
+				&Vector2::new(p1.x, p1.y),
 			);
-			p2 = matrix_c1.transform_vector(
-				&vec3(0.0, 0.0, c1.1),
+			p2 = matrix_c1.transform_point(
+				&Point2::new(0.0, c1.1),
 			);
 		} {
 			let wa_clip_fw = &mut wa_clips[clip_fw as usize];
@@ -140,53 +136,45 @@ impl Lane {
 			for lane_fixed_idx in 0..lnum_fw {
 				let lane_fixed = &wa_clip_fw.lanes_fixed[lane_fixed_idx as usize];
 				clip_fw_offset += lane_fixed.width;
+			} {
+				let lane_fixed = &wa_clip_fw.lanes_fixed[lnum_fw as usize];
+				clip_fw_offset += lane_fixed.width * 0.5;
 			}
-			let matrix_fwc: Mat4 = rotate(
-				&identity(),
-				0.0,
-				&vec3(0.0, 1.0, 0.0),
+			let matrix_fwc: Matrix3<f32> = Matrix3::new_rotation(
+				wa_clip_fw.angle,
 			);
-			let matrix_fwc: Mat4 = translate(
-				&matrix_fwc,
+			let matrix_fwc: Matrix3<f32> = matrix_fwc.append_translation(
 				&wa_clip_fw.position,
 			);
-			p4 = matrix_fwc.transform_vector(
-				&vec3(clip_fw_offset, 0.0, 0.0),
+			p4 = matrix_fwc.transform_point(
+				&Point2::new(clip_fw_offset, 0.0),
 			);
-			let matrix_c2: Mat4 = rotate(
-				&identity(),
+			let matrix_c2: Matrix3<f32> = Matrix3::new_rotation(
 				c2.0,
-				&vec3(0.0, 1.0, 0.0),
 			);
-			let matrix_c2: Mat4 = translate(
-				&matrix_c2,
-				&p4,
+			let matrix_c2 = matrix_c2.append_translation(
+				&Vector2::new(p4.x, p4.y),
 			);
-			p3 = matrix_c2.transform_vector(
-				&vec3(0.0, 0.0, c2.1),
+			p3 = matrix_c2.transform_point(
+				&Point2::new(0.0, c2.1),
 			);
 		}
-
-		let p1_2d: Vec2 = p1.xz();
-		let p2_2d: Vec2 = p2.xz();
-		let p3_2d: Vec2 = p3.xz();
-		let p4_2d: Vec2 = p4.xz();
 
 		// GENERATE POSITIONS
 
 		let mut points: [Point; LANE_MAX_POINTS] = Default::default();
 		let mut point_distance: [f32; LANE_MAX_POINTS] = Default::default();
-		let mut last_point: Vec2 = p1_2d;
+		let mut last_point: Vector2<f32> = Vector2::new(p1.x, p1.y);
 		let mut accumulated_distance: f32 = 0.0;
 		let count: u8 = 5;
 		for i in 0..count {
 			let t: f32 = (i as f32) / ((count - 1) as f32);
 			let omt: f32 = 1.0 - t;
-			let tm1: Vec2 = p1_2d * omt.powf(3.0);
-			let tm2: Vec2 = p2_2d * omt.powf(2.0) * t * 3.0;
-			let tm3: Vec2 = p3_2d * omt * t.powf(2.0) * 3.0;
-			let tm4: Vec2 = p4_2d * t.powf(3.0);
-			let p: Vec2 = tm1 + tm2 + tm3 + tm4;
+			let tm1: Point2<f32> = p1 * omt.powf(3.0);
+			let tm2: Point2<f32> = p2 * omt.powf(2.0) * t * 3.0;
+			let tm3: Point2<f32> = p3 * omt * t.powf(2.0) * 3.0;
+			let tm4: Point2<f32> = p4 * t.powf(3.0);
+			let p: Vector2<f32> = tm1.coords + tm2.coords + tm3.coords + tm4.coords;
 			let mut dis: f32 = 0.0;
 			if i > 0 {
 				dis = last_point.metric_distance(&p);
@@ -205,10 +193,10 @@ impl Lane {
 			clip: clip_bw
 		};
 		wa_lanes[id as usize] = Self {
-			p1: p1_2d,
-			p2: p2_2d,
-			p3: p3_2d,
-			p4: p4_2d,
+			p1: Vector2::new(p1.x, p1.y),
+			p2: Vector2::new(p2.x, p2.y),
+			p3: Vector2::new(p3.x, p3.y),
+			p4: Vector2::new(p4.x, p4.y),
 			points: points.try_into().unwrap(),
 			point_distance,
 			identity,

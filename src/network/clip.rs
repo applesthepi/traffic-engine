@@ -1,6 +1,6 @@
 use std::sync::RwLockWriteGuard;
 
-use nalgebra_glm::{vec3, vec2};
+use nalgebra::Vector2;
 
 use super::{Network, CLIP_MAX_CONNECTIONS, CLIP_MAX_LENGTH, lane::{Lane, LaneIdentity}};
 
@@ -34,10 +34,8 @@ pub struct Clip {
 	pub fw_bands: [u32; CLIP_MAX_LENGTH],
 	/// 3D position of left most point of clip. The
 	/// direction is pointing away from this point.
-	pub position: nalgebra_glm::Vec3,
-	/// Normalized top down direction of clip
-	/// (perpendicular to bands).
-	pub direction: nalgebra_glm::Vec2,
+	pub position: Vector2<f32>,
+	pub angle: f32,
 	/// Bank of clip will be used inside all
 	/// lane's beziar curves to compute vertices.
 	pub bank: f32,
@@ -48,8 +46,8 @@ impl Default for Clip {
 		Self {
 			lanes_fixed: [Fixed::default(); CLIP_MAX_LENGTH],
 			fw_bands: [0; CLIP_MAX_LENGTH],
-			position: vec3(0.0, 0.0, 0.0),
-			direction: vec2(1.0, 0.0),
+			position: Vector2::new(0.0, 0.0),
+			angle: 0.0,
 			bank: 0.0,
 		}
 	}
@@ -58,14 +56,14 @@ impl Default for Clip {
 impl Clip {
 	pub fn new(
 		network: &mut Network,
-		position: nalgebra_glm::Vec3,
-		direction: nalgebra_glm::Vec2,
+		position: Vector2<f32>,
+		angle: f32,
 		bank: f32,
 	) -> u32 {
 		let id = network.fetch_clip_id();
 		let clip = Self {
 			position,
-			direction,
+			angle,
 			bank,
 			..Default::default()
 		};
