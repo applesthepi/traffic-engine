@@ -166,7 +166,7 @@ impl Lane {
 		let mut point_distance: [f32; LANE_MAX_POINTS] = Default::default();
 		let mut last_point: Vector2<f32> = Vector2::new(p1.x, p1.y);
 		let mut accumulated_distance: f32 = 0.0;
-		let count: u8 = 5;
+		let count: u16 = LANE_MAX_POINTS as u16;
 		for i in 0..count {
 			let t: f32 = (i as f32) / ((count - 1) as f32);
 			let omt: f32 = 1.0 - t;

@@ -13,7 +13,7 @@ pub const CLIP_MAX_LENGTH: usize = 64;
 pub const CLIP_MAX_CONNECTIONS: usize = 5;
 
 pub const LANE_MAX_CONNECTIONS: usize = 5;
-pub const LANE_MAX_POINTS: usize = 5;
+pub const LANE_MAX_POINTS: usize = 10;
 pub const LANE_MAX_VEHICLES: usize = 100;
 
 pub const THREADS_PER_BLOCK: usize = 64;
