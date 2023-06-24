@@ -1,6 +1,6 @@
 use std::sync::RwLockWriteGuard;
 
-use nalgebra::Vector2;
+use nalgebra::{Vector2, Vector3, vector, Point3, Matrix4, point, Matrix3};
 
 use super::{Network, CLIP_MAX_CONNECTIONS, CLIP_MAX_LENGTH, lane::{Lane, LaneIdentity}};
 
@@ -34,7 +34,7 @@ pub struct Clip {
 	pub fw_bands: [u32; CLIP_MAX_LENGTH],
 	/// 3D position of left most point of clip. The
 	/// direction is pointing away from this point.
-	pub position: Vector2<f32>,
+	pub position: Vector3<f32>,
 	pub angle: f32,
 	/// Bank of clip will be used inside all
 	/// lane's beziar curves to compute vertices.
@@ -46,7 +46,7 @@ impl Default for Clip {
 		Self {
 			lanes_fixed: [Fixed::default(); CLIP_MAX_LENGTH],
 			fw_bands: [0; CLIP_MAX_LENGTH],
-			position: Vector2::new(0.0, 0.0),
+			position: vector![0.0, 0.0, 0.0],
 			angle: 0.0,
 			bank: 0.0,
 		}
@@ -56,13 +56,13 @@ impl Default for Clip {
 impl Clip {
 	pub fn new(
 		network: &mut Network,
-		position: Vector2<f32>,
+		position: [f32; 3],
 		angle: f32,
 		bank: f32,
 	) -> u32 {
 		let id = network.fetch_clip_id();
 		let clip = Self {
-			position,
+			position: Vector3::from_row_slice(&position),
 			angle,
 			bank,
 			..Default::default()
@@ -70,6 +70,41 @@ impl Clip {
 		let mut wa_clips = network.clips.write().unwrap();
 		wa_clips[id as usize] = clip;
 		id
+	}
+
+	/// Get the 3D position along the clip using
+	/// it's bank and how far along the point is
+	/// relative x.
+	pub fn get_position_bank_rx(
+		&self,
+		rx: f32,
+	) -> Vector3<f32> {
+		debug_assert!(rx >= 0.0);
+		let mut clip_width: f32 = 0.0;
+		for lane_fixed in self.lanes_fixed.iter() {
+			clip_width += lane_fixed.width;
+		}
+		debug_assert!(rx <= clip_width);
+		
+		// RHS
+		
+		let m: Matrix4<f32> = Matrix4::new_rotation(
+			vector![0.0, self.angle, self.bank],
+		);
+		let m: Matrix4<f32> = m.append_translation(
+			&self.position,
+		);
+		let rhs: Vector3<f32> = m.transform_point(
+			&point![clip_width, 0.0, 0.0],
+		).coords;
+
+		// LERP
+
+		let t = rx / clip_width;
+		self.position.lerp(
+			&rhs,
+			t,
+		)
 	}
 
 	pub fn add_fw_lane(

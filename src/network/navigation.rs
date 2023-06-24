@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::RwLockReadGuard};
 
-use nalgebra::{Vector2, vector};
+use nalgebra::{Vector2, vector, Vector3};
 
 use super::{lane::{LaneIdentity, Lane}, band::{BandIdentity, Band}, Network, clip::Clip};
 
@@ -15,12 +15,6 @@ pub struct GFCost {
 	// pub band_id: u32,
 	pub g_cost: f64,
 	pub f_cost: f64,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Point {
-	pub position: Vector2<f32>,
-	pub accumulated_distance: f32,
 }
 
 #[derive(Debug, Default)]
