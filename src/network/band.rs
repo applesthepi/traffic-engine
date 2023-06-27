@@ -245,7 +245,7 @@ impl Band {
 					);
 					width_offset += hwidth;
 					wa_lane.points[i as usize].position = p.coords;
-					println!("{} - {:?}", lane_id, p.coords);
+					// println!("{} - {:?}", lane_id, p.coords);
 				}
 			}
 
@@ -263,6 +263,6 @@ impl Band {
 				wa_lane.length = wa_lane.points.last().unwrap().accumulated_distance;
 			}
 		} // iter controls
-		println!("==========================");
+		// println!("==========================");
 	}
 }
